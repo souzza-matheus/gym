@@ -1,0 +1,267 @@
+version: "3.9"
+
+services:
+
+  # ── API Gateway (Sprint 1) ────────────────────────────────────────────────
+  api-gateway:
+    image: kong:3.4-ubuntu
+    container_name: gymvision-gateway
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+    ports:
+      - "8090:8000"
+      - "8001:8001"
+    volumes:
+      - ./api-gateway/kong.yml:/kong/declarative/kong.yml:ro
+    depends_on:
+      - user-service
+      - pose-service
+      - session-service
+      - notification-service
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── User Service (Sprint 1) ───────────────────────────────────────────────
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: gymvision-user-svc
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/gymvision_users
+      SPRING_DATASOURCE_USERNAME: gymvision
+      SPRING_DATASOURCE_PASSWORD: gymvision123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-gymvision-super-secret-key-change-in-production-min32chars}
+      JWT_EXPIRATION_MS: 900000
+      JWT_REFRESH_EXPIRATION_MS: 604800000
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── Pose + Analyzer Service (Sprints 2+3+6) ──────────────────────────────
+  # Suporta dois modos: frame por frame (app) e upload de vídeo (testes)
+  pose-service:
+    build:
+      context: ./pose-service
+      dockerfile: Dockerfile
+    container_name: gymvision-pose-svc
+    environment:
+      TF_SERVING_HOST: tf-serving
+      TF_SERVING_PORT: 8500
+      MODEL_NAME: movenet_thunder
+      MIN_CONFIDENCE: 0.5
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: gymvision
+      RABBITMQ_PASS: gymvision123
+      TIMESCALE_URL: postgresql://gymvision:gymvision123@timescale:5432/gymvision_analyzer
+    ports:
+      - "8083:8083"
+    depends_on:
+      - tf-serving
+      - rabbitmq
+      - timescale
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── Session Service (Sprint 4) ────────────────────────────────────────────
+  session-service:
+    build:
+      context: ./session-service
+      dockerfile: Dockerfile
+    container_name: gymvision-session-svc
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/gymvision_sessions
+      SPRING_DATASOURCE_USERNAME: gymvision
+      SPRING_DATASOURCE_PASSWORD: gymvision123
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: gymvision
+      RABBITMQ_PASSWORD: gymvision123
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── Notification Service (Sprint 5) ──────────────────────────────────────
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: gymvision-notify-svc
+    environment:
+      RABBITMQ_URL: amqp://gymvision:gymvision123@rabbitmq:5672/
+    ports:
+      - "8085:8085"
+    depends_on:
+      - rabbitmq
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── Analytics Service (Sprint 6) ─────────────────────────────────────────
+  analytics-service:
+    build:
+      context: ./analytics-service
+      dockerfile: Dockerfile
+    container_name: gymvision-analytics-svc
+    environment:
+      MONGO_URL: mongodb://gymvision:gymvision123@mongodb:27017/gymvision_analytics?authSource=admin
+      RABBITMQ_URL: amqp://gymvision:gymvision123@rabbitmq:5672/
+      PORT: 8086
+    ports:
+      - "8086:8086"
+    depends_on:
+      - mongodb
+      - rabbitmq
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── TensorFlow Serving (Sprint 2) ─────────────────────────────────────────
+  tf-serving:
+    image: tensorflow/serving:2.14.0
+    container_name: gymvision-tf-serving
+    environment:
+      MODEL_NAME: movenet_thunder
+    ports:
+      - "8500:8500"
+      - "8501:8501"
+    volumes:
+      - ./pose-service/models:/models/movenet_thunder:ro
+    command: >
+      --model_name=movenet_thunder
+      --model_base_path=/models/movenet_thunder
+      --rest_api_port=8501
+      --port=8500
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── PostgreSQL (Users + Sessions) ─────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: gymvision-postgres
+    environment:
+      POSTGRES_USER: gymvision
+      POSTGRES_PASSWORD: gymvision123
+      POSTGRES_DB: gymvision_users
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gymvision"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── TimescaleDB (Pose frames + analysis series) ───────────────────────────
+  timescale:
+    image: timescale/timescaledb:latest-pg15
+    container_name: gymvision-timescale
+    environment:
+      POSTGRES_USER: gymvision
+      POSTGRES_PASSWORD: gymvision123
+      POSTGRES_DB: gymvision_analyzer
+    ports:
+      - "5433:5432"
+    volumes:
+      - tsdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gymvision -d gymvision_analyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── Redis (Cache + Token Blacklist) ───────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: gymvision-redis
+    command: redis-server --appendonly yes --requirepass gymvision123
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "gymvision123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── RabbitMQ (Message Broker) ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: gymvision-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: gymvision
+      RABBITMQ_DEFAULT_PASS: gymvision123
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./api-gateway/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── MongoDB (Analytics) ───────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: gymvision-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: gymvision
+      MONGO_INITDB_ROOT_PASSWORD: gymvision123
+      MONGO_INITDB_DATABASE: gymvision_analytics
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  tsdata:
+  redisdata:
+  rabbitmqdata:
+  mongodata:
+
+networks:
+  gymvision-net:
+    driver: bridge

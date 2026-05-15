@@ -1,0 +1,23 @@
+{
+  "vhosts": [{ "name": "/" }],
+  "exchanges": [
+    {
+      "name": "gym.events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false
+    }
+  ],
+  "queues": [
+    { "name": "gym.exercise.result",  "vhost": "/", "durable": true },
+    { "name": "gym.alert.created",    "vhost": "/", "durable": true },
+    { "name": "gym.session.ended",    "vhost": "/", "durable": true },
+    { "name": "gym.dlq",              "vhost": "/", "durable": true }
+  ],
+  "bindings": [
+    { "source": "gym.events", "vhost": "/", "destination": "gym.exercise.result", "destination_type": "queue", "routing_key": "exercise.result.#" },
+    { "source": "gym.events", "vhost": "/", "destination": "gym.alert.created",   "destination_type": "queue", "routing_key": "alert.created.#"   },
+    { "source": "gym.events", "vhost": "/", "destination": "gym.session.ended",   "destination_type": "queue", "routing_key": "session.ended.#"   }
+  ]
+}

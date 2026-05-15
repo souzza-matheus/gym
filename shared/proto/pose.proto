@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package gymvision.pose;
+
+option java_multiple_files = true;
+option java_package = "com.gymvision.pose.grpc";
+option java_outer_classname = "PoseProto";
+
+// ── Mensagens ─────────────────────────────────────────────────────────────────
+
+/**
+ * Um landmark corporal detectado pelo MoveNet / ML Kit.
+ * Coordenadas normalizadas (0.0 – 1.0) igual ao ML Kit do app Android.
+ */
+message PoseLandmark {
+  int32  landmark_type = 1;  // LandmarkType enum value (0–32)
+  float  x             = 2;  // Coordenada X normalizada
+  float  y             = 3;  // Coordenada Y normalizada
+  float  z             = 4;  // Profundidade estimada
+  float  visibility    = 5;  // Confiança (0.0 – 1.0)
+}
+
+/** Frame enviado pelo app para análise. */
+message PoseFrame {
+  string session_id    = 1;  // ID da sessão de treino
+  string student_id    = 2;  // ID do aluno
+  int64  timestamp_ms  = 3;  // Timestamp do frame (epoch ms)
+  bytes  frame_jpeg    = 4;  // Frame JPEG bruto (480x640)
+  int32  frame_width   = 5;
+  int32  frame_height  = 6;
+}
+
+/** Resposta com os landmarks detectados. */
+message LandmarkResponse {
+  string          session_id     = 1;
+  repeated PoseLandmark landmarks = 2;
+  int32           landmark_count = 3;
+  float           inference_ms   = 4;
+  string          model          = 5;  // "movenet_thunder"
+}
+
+// ── Serviço ───────────────────────────────────────────────────────────────────
+
+/**
+ * PoseAnalyzer — interface gRPC entre Pose Service e Exercise Analyzer Service.
+ * Substitui as chamadas internas do PoseDetectorProcessor.kt no app Android.
+ */
+service PoseAnalyzer {
+  /** Analisa um único frame (equivalente ao analyze() do PoseDetectorProcessor). */
+  rpc Analyze(PoseFrame) returns (LandmarkResponse);
+
+  /** Stream bidirecional para processamento de vídeo contínuo (STREAM_MODE). */
+  rpc AnalyzeStream(stream PoseFrame) returns (stream LandmarkResponse);
+}
