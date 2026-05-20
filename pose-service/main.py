@@ -120,15 +120,15 @@ async def analyze_pose(
 
     # 1. MoveNet Thunder via TF Serving gRPC
     try:
-        landmarks, inference_ms = tf_client.predict(frame_bytes)
+        landmarks, inference_ms, orientation = tf_client.predict(frame_bytes)
     except Exception as e:
         raise HTTPException(500, f"Erro na detecção de pose: {e}")
 
-    # 2. Analyzer in-process (< 5ms)
+    # 2. Analyzer in-process (< 5ms) — reutiliza orientação já detectada pelo TF client
     result = _analyzer.analyze(SimpleNamespace(
         session_id=session_id, student_id=student_id,
         exercise_type=ex_type, frame_seq=frame_seq, landmarks=landmarks,
-    ))
+    ), orientation=orientation)
 
     if result.has_alert:
         log.warning("ALERTA session=%s frame=%d %s",

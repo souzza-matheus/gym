@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 TIMESCALE_URL = os.getenv(
     "TIMESCALE_URL",
-    "postgresql://gymvision:gymvision123@timescale:5433/gymvision_analyzer"
+    "postgresql://gymvision:gymvision123@timescale:5432/gymvision_analyzer"
 )
 
 _pool: Optional[asyncpg.Pool] = None

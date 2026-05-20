@@ -187,41 +187,8 @@ def _analyze_squat(
                     ),
                     threshold_violated=knee_cave_th,
                 ))
-    else:
-        # Câmera lateral: knee cave detectado como desvio horizontal excessivo
-        # do joelho em relação ao plano lateral esperado.
-        # Usamos o mesmo código original para manter compatibilidade
-        # (os testes passam coords laterais onde o cave é detectável via X).
-        l_knee  = lm.get(LEFT_KNEE)
-        l_ankle = lm.get(LEFT_ANKLE)
-        r_knee  = lm.get(RIGHT_KNEE)
-        r_ankle = lm.get(RIGHT_ANKLE)
-
-        if l_knee and l_ankle:
-            knee_ankle_diff_pct = (l_knee.x - l_ankle.x) * 100
-            if knee_ankle_diff_pct > knee_cave_th:
-                errors.append(DetectedError(
-                    error_type=ErrorType.KNEE_CAVE_LEFT,
-                    risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho esquerdo colapsando para dentro "
-                        f"({knee_ankle_diff_pct:.1f}% de desvio)"
-                    ),
-                    threshold_violated=knee_cave_th,
-                ))
-
-        if r_knee and r_ankle:
-            knee_ankle_diff_pct = (r_ankle.x - r_knee.x) * 100
-            if knee_ankle_diff_pct > knee_cave_th:
-                errors.append(DetectedError(
-                    error_type=ErrorType.KNEE_CAVE_RIGHT,
-                    risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho direito colapsando para dentro "
-                        f"({knee_ankle_diff_pct:.1f}% de desvio)"
-                    ),
-                    threshold_violated=knee_cave_th,
-                ))
+    # Câmera lateral: eixo X representa profundidade sagital, não largura frontal.
+    # Knee cave (valgus) não é detectável nesta orientação — regra desabilitada.
 
     # ── 3. Joelho muito à frente do pé ────────────────────────────────────
     # Confiável apenas com câmera lateral (profundidade sagital em X).

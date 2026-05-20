@@ -24,9 +24,6 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-import cv2
-import numpy as np
-
 from exercise_analyzer import ExerciseAnalyzer
 from models import ExerciseType, MovementPhase, RiskLevel
 
@@ -222,6 +219,8 @@ class VideoAnalyzer:
         Ponto de entrada principal.
         Salva o vídeo em temp file, extrai frames, analisa e monta relatório.
         """
+        import cv2  # lazy — só necessário aqui; RepCounter/FrameResult não precisam
+
         t_total = time.perf_counter()
 
         try:

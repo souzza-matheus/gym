@@ -202,8 +202,8 @@ def detect_orientation(landmarks: list) -> OrientationResult:
     # Ombros e quadris são os sinais mais confiáveis para a distinção lateral/frontal
     weights = {
         "shoulder": 0.40,
-        "ear":      0.20,
-        "nose":     0.25,
+        "ear":      0.25,
+        "nose":     0.20,
         "hip":      0.15,
     }
     frontal_weight = (

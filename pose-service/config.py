@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8083
 
+    rabbitmq_host: str = "rabbitmq"
+    rabbitmq_port: int = 5672
+    rabbitmq_user: str = "gymvision"
+    rabbitmq_pass: str = "gymvision123"
+
     class Config:
         env_file = ".env"
 

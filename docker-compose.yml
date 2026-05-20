@@ -74,9 +74,10 @@ services:
     ports:
       - "8083:8083"
     depends_on:
-      - tf-serving
-      - rabbitmq
-      - timescale
+      rabbitmq:
+        condition: service_healthy
+      timescale:
+        condition: service_healthy
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -101,7 +102,7 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -117,7 +118,8 @@ services:
     ports:
       - "8085:8085"
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -135,8 +137,10 @@ services:
     ports:
       - "8086:8086"
     depends_on:
-      - mongodb
-      - rabbitmq
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -235,6 +239,12 @@ services:
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
       - ./api-gateway/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -251,6 +261,12 @@ services:
       - "27017:27017"
     volumes:
       - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - gymvision-net
     restart: unless-stopped
