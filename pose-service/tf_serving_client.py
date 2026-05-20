@@ -53,7 +53,7 @@ MOVENET_TO_MLKIT: dict[int, LandmarkType] = {
     16: LandmarkType.RIGHT_ANKLE,
 }
 
-MIN_CONFIDENCE: float = 0.15
+MIN_CONFIDENCE: float = 0.5
 MOVENET_INPUT_SIZE: int = 256
 
 
@@ -160,29 +160,32 @@ class TFServingClient:
     def _keypoints_to_landmarks(
         self,
         keypoints: np.ndarray,
-        pad_info: "_PadInfo",
+        pad_info: "Optional[_PadInfo]" = None,
     ) -> list[Landmark]:
         """
         Converte 17 keypoints MoveNet para lista de Landmark.
-        Corrige coordenadas removendo o offset do letterbox padding.
-        Filtra por MIN_CONFIDENCE (descarta apenas landmarks < 0.05).
+        Filtra por MIN_CONFIDENCE (0.5 — espelha PoseDetectorProcessor.kt).
+        Quando pad_info é fornecido, corrige coordenadas removendo letterbox offset.
         """
         landmarks: list[Landmark] = []
 
         for movenet_idx, mlkit_type in MOVENET_TO_MLKIT.items():
             y_norm, x_norm, confidence = keypoints[movenet_idx]
 
-            if confidence < 0.05:
+            if confidence < MIN_CONFIDENCE:
                 continue
 
-            # Remove offset do padding e renormaliza para espaço original
-            x_corrected = _unpad_coord(float(x_norm), pad_info.pad_left, pad_info.scale_w)
-            y_corrected = _unpad_coord(float(y_norm), pad_info.pad_top,  pad_info.scale_h)
+            if pad_info is not None:
+                x_final = _unpad_coord(float(x_norm), pad_info.pad_left, pad_info.scale_w)
+                y_final = _unpad_coord(float(y_norm), pad_info.pad_top,  pad_info.scale_h)
+            else:
+                x_final = float(x_norm)
+                y_final = float(y_norm)
 
             landmarks.append(Landmark(
                 landmark_type=int(mlkit_type),
-                x=float(np.clip(x_corrected, 0.0, 1.0)),
-                y=float(np.clip(y_corrected, 0.0, 1.0)),
+                x=float(np.clip(x_final, 0.0, 1.0)),
+                y=float(np.clip(y_final, 0.0, 1.0)),
                 z=0.0,
                 visibility=float(confidence),
             ))

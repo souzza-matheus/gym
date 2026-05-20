@@ -62,7 +62,7 @@ class TestAnalyzeEndpoint:
 
     def test_valid_frame_returns_200(self):
         frame_bytes = make_blank_frame()
-        with patch.object(TFServingClient, "predict", return_value=([], 25.0)):
+        with patch.object(TFServingClient, "predict", return_value=([], 25.0, None)):
             r = client.post(
                 "/api/v1/pose/analyze",
                 files={"frame": ("frame.jpg", frame_bytes, "image/jpeg")},
@@ -79,7 +79,7 @@ class TestAnalyzeEndpoint:
             make_landmark(LandmarkType.LEFT_KNEE, 0.4, 0.6),
             make_landmark(LandmarkType.RIGHT_KNEE, 0.6, 0.6),
         ]
-        with patch.object(TFServingClient, "predict", return_value=(landmarks, 30.0)):
+        with patch.object(TFServingClient, "predict", return_value=(landmarks, 30.0, None)):
             r = client.post(
                 "/api/v1/pose/analyze",
                 files={"frame": ("f.jpg", make_blank_frame(), "image/jpeg")},
