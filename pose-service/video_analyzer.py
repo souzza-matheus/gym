@@ -272,11 +272,12 @@ class VideoAnalyzer:
 
             # Detecção de pose
             try:
-                landmarks, inference_ms = self.tf_client.predict(jpeg_bytes)
+                landmarks, inference_ms, orientation = self.tf_client.predict(jpeg_bytes)
             except Exception as e:
                 log.warning(f"Erro na inferência frame {frame_seq}: {e}")
                 landmarks = []
                 inference_ms = 0.0
+                orientation = None
 
             # Análise de exercício
             from types import SimpleNamespace
@@ -286,7 +287,7 @@ class VideoAnalyzer:
                 exercise_type=ex_type,
                 frame_seq=frame_seq,
                 landmarks=landmarks,
-            ))
+            ), orientation=orientation)
 
             angles_dict = {
                 "left_knee":  result.joint_angles.left_knee,

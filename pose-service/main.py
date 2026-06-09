@@ -303,7 +303,11 @@ async def update_rule(exercise_type: str, rule_name: str, threshold: float):
     ok = await tsdb.update_exercise_rule(exercise_type, rule_name, threshold)
     if not ok:
         raise HTTPException(500, "Falha ao atualizar regra.")
-    return {"exercise_type": exercise_type.upper(), "rule_name": rule_name, "threshold": threshold}
+    ex_upper = exercise_type.upper()
+    if ex_upper not in _analyzer.thresholds:
+        _analyzer.thresholds[ex_upper] = {}
+    _analyzer.thresholds[ex_upper][rule_name] = threshold
+    return {"exercise_type": ex_upper, "rule_name": rule_name, "threshold": threshold}
 
 
 if __name__ == "__main__":

@@ -196,11 +196,49 @@ class TFServingClient:
         self,
         frame_bytes: bytes,
     ) -> tuple[list[Landmark], float]:
-        """Fallback quando TF Serving não está disponível."""
-        logger.warning("Usando fallback TF local (sem TF Serving)")
+        """Fallback com MediaPipe Pose quando TF Serving não está disponível."""
+        logger.warning("Usando fallback MediaPipe (sem TF Serving)")
         t0 = time.perf_counter()
-        inference_ms = (time.perf_counter() - t0) * 1000
-        return [], inference_ms
+        try:
+            import mediapipe as mp
+
+            nparr = np.frombuffer(frame_bytes, np.uint8)
+            img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return [], (time.perf_counter() - t0) * 1000
+
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            with mp.solutions.pose.Pose(
+                static_image_mode=True,
+                model_complexity=1,
+                min_detection_confidence=0.3,
+                min_tracking_confidence=0.3,
+            ) as pose:
+                results = pose.process(img_rgb)
+
+            if not results.pose_landmarks:
+                logger.warning("MediaPipe não detectou landmarks na imagem.")
+                return [], (time.perf_counter() - t0) * 1000
+
+            landmarks: list[Landmark] = []
+            for idx, lm in enumerate(results.pose_landmarks.landmark):
+                if lm.visibility < 0.2:
+                    continue
+                landmarks.append(Landmark(
+                    landmark_type=idx,
+                    x=float(np.clip(lm.x, 0.0, 1.0)),
+                    y=float(np.clip(lm.y, 0.0, 1.0)),
+                    z=float(lm.z),
+                    visibility=float(np.clip(lm.visibility, 0.0, 1.0)),
+                ))
+
+            logger.info(f"MediaPipe detectou {len(landmarks)} landmarks.")
+            return landmarks, (time.perf_counter() - t0) * 1000
+
+        except Exception as e:
+            logger.error(f"Erro no fallback MediaPipe: {e}")
+            return [], (time.perf_counter() - t0) * 1000
 
     def close(self):
         if self._channel:

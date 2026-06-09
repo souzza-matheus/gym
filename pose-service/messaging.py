@@ -69,9 +69,13 @@ async def _publish(routing_key: str, payload: dict):
         return
     try:
         exchange = await _channel.get_exchange(EXCHANGE)
+        envelope = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "data": payload,
+        }
         await exchange.publish(
             aio_pika.Message(
-                body=json.dumps(payload, default=str).encode(),
+                body=json.dumps(envelope, default=str).encode(),
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             ),
             routing_key=routing_key,

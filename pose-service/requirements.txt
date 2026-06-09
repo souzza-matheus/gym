@@ -5,6 +5,7 @@ opencv-python-headless==4.9.0.80
 numpy==1.26.4
 grpcio==1.63.0
 tensorflow-serving-api==2.14.0
+mediapipe==0.10.14
 aio-pika==9.4.1
 asyncpg==0.29.0
 pydantic==2.7.1
