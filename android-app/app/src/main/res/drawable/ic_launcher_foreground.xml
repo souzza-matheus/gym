@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Dumbbell rotated 45° — símbolo do GymVision -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="45">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M22,38 H40 V70 H22 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M68,38 H86 V70 H68 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M40,49 H68 V59 H40 Z" />
+    </group>
+</vector>

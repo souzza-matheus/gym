@@ -6,6 +6,20 @@ Este arquivo registra todas as ações realizadas pelo Claude no projeto `gymvis
 
 ## 2026-06-09
 
+### 20:44 — Redesign completo do app mobile (Jetpack Compose + Material 3) integrado aos microsserviços
+- Migração total de `android-app` de Views/XML (Activities/Fragments) para **Jetpack Compose + Material 3** (Compose BOM 2024.02.00, Kotlin 1.9.21, AGP 8.2.0).
+- Tema custom (`ui/theme/{Color,Type,Theme}.kt`), ícone adaptativo e splash screen (`androidx.core:core-splashscreen`).
+- Navegação: `MainActivity` único + `AppNavHost` (login ↔ main) + `MainScreen` com bottom navigation (Sessões, Progresso, Perfil).
+- Telas novas: `LoginScreen`, `SessionListScreen` (pull-to-refresh, criação de sessão via bottom sheet), `SessionDetailScreen` (relatório via `analytics-service`), `CameraScreen` (overlay de esqueleto/landmarks em tempo real via `PoseOverlay` + Canvas, gauge de score, alertas via WebSocket do `notification-service`), `ProgressScreen` (gráfico semanal, top erros, sessões recentes via `analytics-service`), `ProfileScreen` (dados via `user-service /me`, logout).
+- Componentes compartilhados: `StatCard`, `ScoreGauge`, `RiskMappers` (PT-BR), `LoadingError`.
+- `ApiClient`/`ApiInterfaces`/`Models`: adicionados `userApi`, `analyticsApi`, DTOs de analytics, helpers de sessão (`saveUserInfo`, `getUserId`, etc.).
+- Corrigido bug de assinatura de `CameraViewModel.onFrame()` (parâmetro `academyId` estava na posição errada).
+- Removidos arquivos antigos: `LoginActivity`, `SessionListActivity`, `CameraActivity`, `CameraFragment` e seus layouts XML; `AndroidManifest.xml` agora registra apenas `MainActivity` com tema/ícone novos.
+- Build configurado: gradle wrapper 8.5 copiado para `android-app/`, `local.properties` com SDK, `gradle.properties` com `android.useAndroidX=true`.
+- Corrigidos erros de build: `Theme.GymVision` (parent inválido `Theme.DeviceDefault.DayNight.NoActionBar` → `Theme.DeviceDefault.NoActionBar`), `package` duplicado no manifest, import de `installSplashScreen`, import de `Modifier.padding` em `MainScreen`.
+- `gradle/wrapper/gradle-wrapper.jar` em `android-app/` estava vazio (0 bytes); regenerado via `gradle wrapper --gradle-version 8.5` usando a distribuição em cache.
+- **Validado**: `./gradlew :app:compileDebugKotlin` e `./gradlew :app:assembleDebug` passam com sucesso (`app-debug.apk` gerado, 18MB).
+
 ### 09:00 — Criação do arquivo de log
 - Criou este arquivo `ACTIONS_LOG.md` na raiz do projeto para registrar ações futuras.
 

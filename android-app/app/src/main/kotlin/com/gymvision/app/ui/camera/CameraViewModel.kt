@@ -1,6 +1,5 @@
 package com.gymvision.app.ui.camera
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -8,11 +7,10 @@ import androidx.camera.core.ImageProxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gymvision.app.api.ApiClient
-import com.gymvision.app.model.ExerciseAnalysis
-import com.gymvision.app.model.PoseAnalysisResponse
+import com.gymvision.app.model.DetectedError
+import com.gymvision.app.model.Landmark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -24,12 +22,12 @@ import java.io.ByteArrayOutputStream
 data class AnalysisUiState(
     val isAnalyzing: Boolean = false,
     val score: Float = 0f,
-    val phase: String = "–",
-    val errors: List<String> = emptyList(),
+    val phase: String = "UNKNOWN",
+    val errors: List<DetectedError> = emptyList(),
     val hasAlert: Boolean = false,
-    val landmarkCount: Int = 0,
+    val landmarks: List<Landmark> = emptyList(),
     val frameSeq: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
 )
 
 class CameraViewModel : ViewModel() {
@@ -43,17 +41,17 @@ class CameraViewModel : ViewModel() {
     // Throttle: processa 1 frame a cada 200ms (~5fps de análise)
     // para não sobrecarregar o servidor com 30fps da câmera
     private var lastAnalysisTime = 0L
-    private val ANALYSIS_INTERVAL_MS = 200L
+    private val analysisIntervalMs = 200L
 
     fun onFrame(
-        academyId: String = "",
         imageProxy: ImageProxy,
         exerciseType: String,
         sessionId: String,
-        studentId: String
+        studentId: String,
+        academyId: String = "",
     ) {
         val now = System.currentTimeMillis()
-        if (now - lastAnalysisTime < ANALYSIS_INTERVAL_MS) {
+        if (now - lastAnalysisTime < analysisIntervalMs) {
             imageProxy.close()
             return
         }
@@ -74,7 +72,7 @@ class CameraViewModel : ViewModel() {
                     "frame", "frame.jpg",
                     bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
                 )
-                val response = ApiClient.poseApi.analyze(
+                ApiClient.poseApi.analyze(
                     frame = framePart,
                     exerciseType = exerciseType.toRequestBody("text/plain".toMediaTypeOrNull()),
                     sessionId = sessionId.toRequestBody("text/plain".toMediaTypeOrNull()),
@@ -82,29 +80,29 @@ class CameraViewModel : ViewModel() {
                     frameSeq = seq.toString().toRequestBody("text/plain".toMediaTypeOrNull()),
                     academyId = academyId.toRequestBody("text/plain".toMediaTypeOrNull())
                 )
-
-                if (response.isSuccessful) {
-                    val body = response.body()!!
+            }.onSuccess { response ->
+                val body = response.body()
+                if (response.isSuccessful && body != null) {
                     val analysis = body.analysis
                     _state.value = AnalysisUiState(
                         isAnalyzing = false,
-                        score = analysis?.score ?: 0f,
-                        phase = analysis?.phase ?: "–",
-                        errors = analysis?.errors?.map { it.description } ?: emptyList(),
+                        score = analysis?.score ?: _state.value.score,
+                        phase = analysis?.phase ?: _state.value.phase,
+                        errors = analysis?.errors ?: emptyList(),
                         hasAlert = analysis?.hasAlert ?: false,
-                        landmarkCount = body.landmarkCount,
-                        frameSeq = seq
+                        landmarks = body.landmarks,
+                        frameSeq = seq,
                     )
                 } else {
                     _state.value = _state.value.copy(
                         isAnalyzing = false,
-                        errorMessage = "Erro ${response.code()}"
+                        errorMessage = "Erro ${response.code()}",
                     )
                 }
             }.onFailure { e ->
                 _state.value = _state.value.copy(
                     isAnalyzing = false,
-                    errorMessage = e.message
+                    errorMessage = e.message,
                 )
             }
         }
@@ -126,5 +124,3 @@ class CameraViewModel : ViewModel() {
         }.getOrNull()
     }
 }
-// NOTE: academy_id is passed via the analyze call.
-// Update onFrame() signature if needed in CameraFragment.

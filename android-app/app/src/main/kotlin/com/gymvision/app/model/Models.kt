@@ -114,3 +114,46 @@ data class WsAnalysis(
     val phase: String,
     val frameSeq: Int
 )
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+data class WeeklyProgress(
+    val week: String,
+    @SerializedName("avg_score")      val avgScore: Double,
+    @SerializedName("dominant_error") val dominantError: String?,
+    @SerializedName("sessions_count") val sessionsCount: Int
+)
+
+data class OverallStats(
+    @SerializedName("total_sessions") val totalSessions: Int,
+    @SerializedName("total_reps")     val totalReps: Int,
+    @SerializedName("avg_score")      val avgScore: Double,
+    @SerializedName("best_score")     val bestScore: Double
+)
+
+data class TopError(
+    val error: String,
+    val count: Int
+)
+
+data class SessionReport(
+    @SerializedName("session_id")    val sessionId: String,
+    @SerializedName("student_id")    val studentId: String,
+    @SerializedName("academy_id")    val academyId: String,
+    @SerializedName("exercise_type") val exerciseType: String,
+    @SerializedName("avg_score")     val avgScore: Double,
+    @SerializedName("total_reps")    val totalReps: Int,
+    @SerializedName("alert_count")   val alertCount: Int,
+    @SerializedName("dominant_error") val dominantError: String?,
+    @SerializedName("duration_ms")   val durationMs: Long,
+    @SerializedName("started_at")    val startedAt: String?,
+    @SerializedName("ended_at")      val endedAt: String?
+)
+
+data class StudentAnalyticsResponse(
+    @SerializedName("student_id")      val studentId: String,
+    @SerializedName("weekly_progress") val weeklyProgress: List<WeeklyProgress>,
+    @SerializedName("recent_sessions") val recentSessions: List<SessionReport>,
+    @SerializedName("overall_stats")   val overallStats: OverallStats,
+    @SerializedName("top_errors")      val topErrors: List<TopError>
+)

@@ -50,3 +50,19 @@ interface SessionApi {
     @GET("api/v1/sessions/{id}/summary")
     suspend fun summary(@Path("id") id: String): Response<ApiResponse<SessionSummary>>
 }
+
+interface UserApi {
+    @GET("api/v1/users/me")
+    suspend fun me(): Response<ApiResponse<UserDto>>
+}
+
+interface AnalyticsApi {
+    @GET("api/v1/analytics/student/{studentId}")
+    suspend fun studentAnalytics(
+        @Path("studentId") studentId: String,
+        @Query("weeks") weeks: Int = 8
+    ): Response<StudentAnalyticsResponse>
+
+    @GET("api/v1/analytics/session/{sessionId}/report")
+    suspend fun sessionReport(@Path("sessionId") sessionId: String): Response<SessionReport>
+}

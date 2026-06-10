@@ -1,6 +1,8 @@
 package com.gymvision.session.model
 
 import jakarta.persistence.*
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.util.UUID
 
@@ -30,6 +32,7 @@ data class Rep(
     val repNumber: Int,
     val score: Double,
     val phase: String,
+    @JdbcTypeCode(SqlTypes.JSON)
     val errors: String = "[]",   // JSON
     val hasAlert: Boolean = false,
     @Column(name = "recorded_at") val recordedAt: Instant = Instant.now()
