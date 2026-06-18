@@ -43,6 +43,17 @@ _MODELS_DIR = os.path.join(os.path.dirname(__file__), "ai", "models_ai")
 _TRAINED_EXERCISES = {ExerciseType.SQUAT, ExerciseType.DEADLIFT, ExerciseType.BENCH_PRESS}
 _form_models: dict[ExerciseType, dict] = {}
 
+# SQUAT/DEADLIFT dependem da profundidade do joelho para o score fazer
+# sentido — sem o landmark, a fase é genuinamente indeterminável. Já no
+# BENCH_PRESS o ângulo do joelho é só uma convenção do dataset sintético
+# (a pessoa está deitada; a perna não importa para a forma do supino), então
+# pernas fora de quadro (comum em filmagens reais) não devem zerar o score.
+_KNEE_DEPENDENT_EXERCISES = {ExerciseType.SQUAT, ExerciseType.DEADLIFT}
+
+
+def _has_value(v) -> bool:
+    return v is not None and v == v  # False para None/NaN
+
 
 def _load_form_model(exercise_type: ExerciseType) -> Optional[dict]:
     if exercise_type in _form_models:
@@ -184,7 +195,12 @@ class ExerciseAnalyzer:
 
         pred_labels = model["error_classifier"].predict(X_imp)[0]
         raw_score = float(model["score_regressor"].predict(X_imp)[0])
-        score = 0.0 if phase == MovementPhase.UNKNOWN else max(0.0, min(100.0, round(raw_score, 1)))
+
+        if ex_type in _KNEE_DEPENDENT_EXERCISES:
+            assessable = phase != MovementPhase.UNKNOWN
+        else:
+            assessable = _has_value(feats.get("arm_angle_left")) or _has_value(feats.get("arm_angle_right"))
+        score = max(0.0, min(100.0, round(raw_score, 1))) if assessable else 0.0
 
         errors: list[DetectedError] = []
         for col, label in zip(model["error_columns"], pred_labels):

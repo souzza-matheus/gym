@@ -6,6 +6,16 @@ Este arquivo registra todas as ações realizadas pelo Claude no projeto `gymvis
 
 ## 2026-06-18
 
+### Correção dos 2 achados da validação com vídeos reais
+
+A pedido do usuário, corrigidos os dois problemas identificados na validação anterior (ver entrada abaixo, "Validação de eficácia...").
+
+**1. Score zerado em BENCH_PRESS quando pernas fora de quadro** — `ai_exercise_analyzer.py`: `_predict_ml()` zerava o score sempre que `phase == MovementPhase.UNKNOWN` (joelho não detectado), para **todos** os exercícios. Para SQUAT/DEADLIFT isso é correto (profundidade do joelho é o que está sendo avaliado). Para BENCH_PRESS, o ângulo do joelho nunca foi um sinal real de forma — é só uma convenção do dataset sintético (pessoa deitada, perna não importa). Criado `_KNEE_DEPENDENT_EXERCISES = {SQUAT, DEADLIFT}`: só esses dois continuam zerando o score por joelho ausente; BENCH_PRESS agora só zera se o cotovelo (`arm_angle_left`/`arm_angle_right`, o que de fato é avaliado) também estiver ausente. **Validado**: vídeo real de supino (Smith machine, pernas fora de quadro) que antes dava `avg_score=0.0` em 100% dos frames agora dá `avg_score=64.2` (min 45.6, max 99.7), mantendo os mesmos erros corretamente detectados (ELBOW_FLARE, ELBOW_INSUFFICIENT_RANGE, WRIST_BENT). Sem regressão: SQUAT/DEADLIFT/LUNGE/BENT_OVER_ROW re-testados com os mesmos 4 vídeos da validação anterior — scores idênticos (97.7/95.8/92.8/76.0).
+
+**2. `classify_frames()` (classificação multi-frame, mais robusta) nunca era chamada por nenhum endpoint** — `video_analyzer.py`: `VideoAnalyzer.analyze()` agora acumula os landmarks de todos os frames do vídeo (`all_landmarks`) e chama `classify_frames(all_landmarks)` ao final do processamento, antes de montar o relatório. Novos campos `detected_exercise_type` e `detected_exercise_confidence` adicionados a `VideoAnalysisReport`/`VideoAnalysisResponse` (`main.py`) — **puramente informativos**, não substituem nem alteram o `exercise_type` declarado pelo cliente nem a análise de forma já feita; servem como cross-check ("você selecionou X, mas o classificador acha que é Y com Z% de confiança"). Validado: vídeo de squat real → `detected_exercise_type=SQUAT` (57.5%); demais vídeos retornam resultados consistentes com o viés para SQUAT já documentado na validação anterior (limitação de cobertura de landmarks do MoveNet em vídeo real, não deste fix).
+
+**Build & teste**: `docker compose build pose-service && up -d --force-recreate pose-service`; cache Redis do vídeo de teste limpo (`FLUSHALL`) antes de re-validar, já que o relatório antigo (pré-fix) estava cacheado por hash do vídeo. `pytest tests/test_ai_exercise_engine.py tests/test_exercise_analyzer.py` — **48/48 passando**, sem regressão.
+
 ### Validação de eficácia do motor de IA com 5 vídeos reais buscados na web (YouTube Shorts)
 
 **Objetivo**: validar generalização do classificador (`ai_exercise_classifier.py`) e dos modelos de forma (`ai_exercise_analyzer.py`) com vídeos reais e variados, além do único vídeo de squat já usado em validações anteriores.

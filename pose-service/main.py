@@ -255,6 +255,8 @@ class VideoAnalysisResponse(BaseModel):
     phase_distribution:    dict
     avg_score_by_phase:    dict
     critical_frames:       list[dict]
+    detected_exercise_type:       str = "UNKNOWN"
+    detected_exercise_confidence: float = 0.0
 
 
 @app.post(

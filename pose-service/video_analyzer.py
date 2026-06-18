@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ai_exercise_analyzer import ExerciseAnalyzer
+from ai_exercise_classifier import classify_frames
 from models import ExerciseType, MovementPhase, RiskLevel
 
 log = logging.getLogger(__name__)
@@ -108,6 +109,11 @@ class VideoAnalysisReport:
 
     # Frames com problemas críticos
     critical_frames: list[dict]     # frames com score < 50 ou erro HIGH
+
+    # Classificação automática (média de probabilidades entre todos os
+    # frames do vídeo) — cross-check do exercise_type informado pelo cliente
+    detected_exercise_type: str = "UNKNOWN"
+    detected_exercise_confidence: float = 0.0
 
 
 # ── Rep counter ───────────────────────────────────────────────────────────────
@@ -235,6 +241,7 @@ class VideoAnalyzer:
 
         frame_results: list[FrameResult] = []
         alert_events: list[AlertEvent] = []
+        all_landmarks: list = []  # landmarks por frame — para classify_frames() no fim
         last_alert_time: dict[str, float] = defaultdict(float)  # error_type → mono time
 
         cap = cv2.VideoCapture(tmp_path)
@@ -278,6 +285,8 @@ class VideoAnalyzer:
                 landmarks = []
                 inference_ms = 0.0
                 orientation = None
+
+            all_landmarks.append(landmarks)
 
             # Análise de exercício
             from types import SimpleNamespace
@@ -345,6 +354,11 @@ class VideoAnalyzer:
         cap.release()
         rep_counter.finish()
 
+        # Classificação automática (multi-frame, mais robusta que 1 frame só)
+        # — só para reportar como cross-check, não substitui o exercise_type
+        # informado pelo cliente nem afeta a análise de forma já feita acima.
+        detection = classify_frames(all_landmarks)
+
         # ── Monta relatório ───────────────────────────────────────────────
         return self._build_report(
             frame_results=frame_results,
@@ -353,6 +367,8 @@ class VideoAnalyzer:
             exercise_type=exercise_type.upper(),
             total_video_ms=total_video_ms,
             frame_interval_ms=frame_interval_ms,
+            detected_exercise_type=detection.exercise_type.value,
+            detected_exercise_confidence=round(detection.confidence, 3),
         )
 
     def _build_report(
@@ -363,6 +379,8 @@ class VideoAnalyzer:
         exercise_type: str,
         total_video_ms: float,
         frame_interval_ms: float,
+        detected_exercise_type: str = "UNKNOWN",
+        detected_exercise_confidence: float = 0.0,
     ) -> VideoAnalysisReport:
 
         if not frame_results:
@@ -378,6 +396,8 @@ class VideoAnalyzer:
                 top_errors=[], professor_alerts=[],
                 phase_distribution={}, avg_score_by_phase={},
                 critical_frames=[],
+                detected_exercise_type=detected_exercise_type,
+                detected_exercise_confidence=detected_exercise_confidence,
             )
 
         frames_with_lm = [f for f in frame_results if f.landmark_count > 0]
@@ -483,6 +503,8 @@ class VideoAnalyzer:
             phase_distribution=phase_dist,
             avg_score_by_phase=avg_score_by_phase,
             critical_frames=critical_frames[:20],  # máx 20 no relatório
+            detected_exercise_type=detected_exercise_type,
+            detected_exercise_confidence=detected_exercise_confidence,
         )
 
 
