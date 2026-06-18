@@ -1,13 +1,29 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAlerts } from '../hooks/useAlerts';
 import { AlertCard } from '../components/AlertCard';
+import { ErrorHeatmap } from '../components/ErrorHeatmap';
+import { usePushNotification } from '../hooks/usePushNotification';
 
 const ACADEMY_ID = import.meta.env.VITE_ACADEMY_ID ?? '00000000-0000-0000-0000-000000000001';
 const USER_ID    = import.meta.env.VITE_USER_ID    ?? 'professor';
 
 export function TeacherDashboard() {
   const { alerts, analysis, connected, acknowledge } = useAlerts(ACADEMY_ID, USER_ID);
+  const { supported: pushSupported, permission, register: registerPush, notify } = usePushNotification();
   const [filter, setFilter] = useState<'ALL' | 'HIGH' | 'MEDIUM'>('ALL');
+
+  // Dispara push notification quando chega alerta HIGH com aba em background
+  useEffect(() => {
+    const latest = alerts[0];
+    if (!latest || latest.acknowledged) return;
+    if (latest.riskLevel === 'HIGH') {
+      notify(
+        'GymVision — Alerta HIGH',
+        latest.description,
+        `${latest.sessionId}-${latest.errorType}`,
+      );
+    }
+  }, [alerts[0]?.id]);
 
   const filtered = alerts.filter(a =>
     filter === 'ALL' ? true : a.riskLevel === filter
@@ -29,6 +45,14 @@ export function TeacherDashboard() {
               <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
               {connected ? 'Ao vivo' : 'Desconectado'}
             </span>
+            {pushSupported && permission !== 'granted' && (
+              <button
+                onClick={registerPush}
+                className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2 py-1 hover:bg-blue-50"
+              >
+                Ativar notificações
+              </button>
+            )}
             {unread > 0 && (
               <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
                 {unread} novo{unread > 1 ? 's' : ''}
@@ -67,6 +91,13 @@ export function TeacherDashboard() {
             </button>
           ))}
         </div>
+
+        {/* Mapa de calor de erros */}
+        {alerts.length > 0 && (
+          <div className="mb-4">
+            <ErrorHeatmap alerts={alerts} />
+          </div>
+        )}
 
         {/* Alert list */}
         <div>

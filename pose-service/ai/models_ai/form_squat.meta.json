@@ -1,0 +1,13 @@
+{
+  "error_accuracy": {
+    "DEPTH_INSUFFICIENT": 0.9994,
+    "KNEE_CAVE_LEFT": 1.0,
+    "KNEE_CAVE_RIGHT": 1.0,
+    "KNEE_OVER_TOE_LEFT": 0.9994,
+    "KNEE_OVER_TOE_RIGHT": 1.0,
+    "BACK_NOT_STRAIGHT": 0.9994
+  },
+  "score_mae": 0.7235985115950809,
+  "n_train": 7200,
+  "n_test": 1800
+}

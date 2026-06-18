@@ -18,10 +18,6 @@ interface AuthApi {
 }
 
 interface PoseApi {
-    /**
-     * Envia frame JPEG + exercise_type e recebe landmarks + análise completa.
-     * Um único endpoint — pose e analyzer integrados.
-     */
     @Multipart
     @POST("api/v1/pose/analyze")
     suspend fun analyze(
@@ -32,6 +28,14 @@ interface PoseApi {
         @Part("frame_seq") frameSeq: RequestBody,
         @Part("academy_id") academyId: RequestBody
     ): Response<PoseAnalysisResponse>
+
+    @Multipart
+    @POST("api/v1/pose/detect-exercise")
+    suspend fun detectExercise(
+        @Part frame: MultipartBody.Part,
+        @Part("session_id") sessionId: RequestBody,
+        @Part("student_id") studentId: RequestBody,
+    ): Response<ExerciseDetectionResponse>
 }
 
 interface SessionApi {
@@ -54,6 +58,20 @@ interface SessionApi {
 interface UserApi {
     @GET("api/v1/users/me")
     suspend fun me(): Response<ApiResponse<UserDto>>
+
+    @POST("api/v1/users/join-academy")
+    suspend fun joinAcademy(@Body body: Map<String, String>): Response<ApiResponse<UserDto>>
+
+    @GET("api/v1/users/me/export")
+    suspend fun exportMyData(): Response<ApiResponse<Map<String, Any?>>>
+
+    @DELETE("api/v1/users/me")
+    suspend fun deleteMyAccount(): Response<Void>
+}
+
+interface WorkoutPlanApi {
+    @GET("api/v1/workout-plans/student/{studentId}")
+    suspend fun listByStudent(@Path("studentId") studentId: String): Response<ApiResponse<List<WorkoutPlan>>>
 }
 
 interface AnalyticsApi {
@@ -65,4 +83,13 @@ interface AnalyticsApi {
 
     @GET("api/v1/analytics/session/{sessionId}/report")
     suspend fun sessionReport(@Path("sessionId") sessionId: String): Response<SessionReport>
+
+    @GET("api/v1/analytics/gamification/{studentId}")
+    suspend fun gamification(@Path("studentId") studentId: String): Response<GamificationResponse>
+
+    @GET("api/v1/analytics/academy/{academyId}/leaderboard")
+    suspend fun leaderboard(
+        @Path("academyId") academyId: String,
+        @Query("limit") limit: Int = 10
+    ): Response<LeaderboardResponse>
 }

@@ -1,0 +1,512 @@
+package com.gymvision.app.ui.videotest
+
+import android.content.Intent
+import android.net.Uri
+import android.widget.VideoView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.gymvision.app.model.DetectedError
+import com.gymvision.app.ui.camera.PoseOverlay
+import com.gymvision.app.ui.components.ScoreGauge
+import com.gymvision.app.ui.components.errorIcon
+import com.gymvision.app.ui.components.exerciseLabel
+import com.gymvision.app.ui.components.phaseLabel
+import com.gymvision.app.ui.components.riskColor
+import com.gymvision.app.ui.theme.RiskLow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlin.math.abs
+
+private val EXERCISES = listOf("SQUAT", "DEADLIFT", "LUNGE")
+
+@Composable
+fun VideoTestScreen(viewModel: VideoTestViewModel = viewModel()) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var exerciseType by remember { mutableStateOf("SQUAT") }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.processVideo(uri, context, exerciseType)
+        }
+    }
+
+    when (val s = state) {
+        is VideoTestState.Idle -> SetupUI(
+            exerciseType = exerciseType,
+            onExerciseChange = { exerciseType = it },
+            onPickVideo = { videoPickerLauncher.launch(arrayOf("video/*")) },
+        )
+
+        is VideoTestState.Processing -> ProcessingUI(progress = s.progress, total = s.total)
+
+        is VideoTestState.Ready -> PlaybackUI(
+            videoUri = s.videoUri,
+            frames = s.frames,
+            onBack = { viewModel.reset() },
+        )
+
+        is VideoTestState.Error -> ErrorUI(
+            message = s.message,
+            onRetry = { viewModel.reset() },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SetupUI(
+    exerciseType: String,
+    onExerciseChange: (String) -> Unit,
+    onPickVideo: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Testar com Vídeo", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "Simula o pipeline da câmera ao vivo",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "Escolha o exercício",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            EXERCISES.forEach { ex ->
+                val selected = ex == exerciseType
+                ElevatedCard(
+                    onClick = { onExerciseChange(ex) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = exerciseLabel(ex),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (selected) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+
+            Button(
+                onClick = onPickVideo,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+            ) {
+                Icon(Icons.Filled.VideoLibrary, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Text("Escolher vídeo (.mp4, .mov, .avi)")
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "O app enviará cada frame ao servidor de análise de pose e exibirá o esqueleto sincronizado com o vídeo — exatamente como acontece com a câmera ao vivo.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProcessingUI(progress: Int, total: Int) {
+    val fraction = if (total > 0) progress.toFloat() / total else 0f
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp),
+        ) {
+            CircularProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.size(80.dp),
+                strokeWidth = 6.dp,
+            )
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "Analisando vídeo",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Frame $progress de $total",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Enviando frames para o servidor de pose…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaybackUI(
+    videoUri: Uri,
+    frames: List<FrameData>,
+    onBack: () -> Unit,
+) {
+    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+    var currentFrame by remember { mutableStateOf<FrameData?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+
+    // Poll video position every 100ms to sync overlay with playback
+    LaunchedEffect(videoViewRef) {
+        while (isActive) {
+            delay(100)
+            val vv = videoViewRef ?: continue
+            isPlaying = vv.isPlaying
+            val posMs = vv.currentPosition.toLong()
+            if (frames.isNotEmpty()) {
+                currentFrame = frames.minByOrNull { abs(it.timestampMs - posMs) }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        // Video player
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                VideoView(ctx).also { vv ->
+                    vv.setVideoURI(videoUri)
+                    vv.setOnPreparedListener { mp ->
+                        mp.isLooping = false
+                        vv.start()
+                    }
+                    videoViewRef = vv
+                }
+            },
+        )
+
+        // Skeleton overlay — same PoseOverlay used in CameraScreen
+        PoseOverlay(
+            landmarks = currentFrame?.landmarks ?: emptyList(),
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Score gauge + phase chip (top-left, mirroring CameraScreen layout)
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .padding(6.dp),
+            ) {
+                ScoreGauge(score = currentFrame?.score ?: 0f, size = 64.dp, strokeWidth = 6.dp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = phaseLabel(currentFrame?.phase ?: "UNKNOWN"),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+
+        // Close / back button (top-right)
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(4.dp),
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Sair", tint = Color.White)
+            }
+        }
+
+        // Play / Pause button (bottom-right corner, above the errors card)
+        FilledIconButton(
+            onClick = {
+                videoViewRef?.let { vv ->
+                    if (vv.isPlaying) vv.pause() else vv.start()
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 16.dp, bottom = 148.dp),
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
+            )
+        }
+
+        // Alert banner for current HIGH/MEDIUM error
+        val alertError = currentFrame?.errors?.firstOrNull { it.riskLevel in listOf("HIGH", "MEDIUM") }
+        AnimatedVisibility(
+            visible = alertError != null,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 96.dp, start = 16.dp, end = 16.dp),
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+        ) {
+            alertError?.let { err ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = riskColor(err.riskLevel),
+                    shadowElevation = 8.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = err.description,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Errors card at bottom — mirrors CameraScreen.ErrorsCard
+        VideoErrorsCard(
+            errors = currentFrame?.errors ?: emptyList(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun VideoErrorsCard(errors: List<DetectedError>, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        shadowElevation = 8.dp,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            if (errors.isEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = RiskLow)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Postura correta",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            } else {
+                Text(
+                    text = "Pontos de atenção",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+                errors.forEach { error ->
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = errorIcon(error.errorType),
+                            contentDescription = null,
+                            tint = riskColor(error.riskLevel),
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(text = error.description, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorUI(message: String, onRetry: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Error,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Erro ao processar vídeo",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onRetry) {
+                Text("Tentar novamente")
+            }
+        }
+    }
+}

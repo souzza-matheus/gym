@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.gymvision.app.api.ApiClient
 import com.gymvision.app.ui.auth.LoginScreen
+import com.gymvision.app.ui.camera.CameraGuideScreen
 import com.gymvision.app.ui.camera.CameraScreen
 import com.gymvision.app.ui.sessions.SessionDetailScreen
 
@@ -40,21 +41,50 @@ fun AppNavHost() {
             MainScreen(rootNavController = navController)
         }
 
+        // Guia de câmera — exibido antes de iniciar a sessão
+        composable(
+            route = Routes.CAMERA_GUIDE,
+            arguments = listOf(
+                navArgument("sessionId")    { type = NavType.StringType },
+                navArgument("exerciseType") { type = NavType.StringType },
+                navArgument("studentId")    { type = NavType.StringType },
+                navArgument("academyId")    { type = NavType.StringType },
+            )
+        ) { backStackEntry ->
+            val sessionId    = backStackEntry.arguments?.getString("sessionId")    ?: ""
+            val exerciseType = backStackEntry.arguments?.getString("exerciseType") ?: "SQUAT"
+            val studentId    = backStackEntry.arguments?.getString("studentId")    ?: ""
+            val academyId    = backStackEntry.arguments?.getString("academyId")    ?: ""
+            CameraGuideScreen(
+                exerciseType = exerciseType,
+                onStart = {
+                    navController.navigate(Routes.camera(sessionId, exerciseType, studentId, academyId)) {
+                        popUpTo(Routes.CAMERA_GUIDE) { inclusive = true }
+                    }
+                },
+                onSkip = {
+                    navController.navigate(Routes.camera(sessionId, exerciseType, studentId, academyId)) {
+                        popUpTo(Routes.CAMERA_GUIDE) { inclusive = true }
+                    }
+                },
+            )
+        }
+
         composable(
             route = Routes.CAMERA,
             arguments = listOf(
-                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("sessionId")    { type = NavType.StringType },
                 navArgument("exerciseType") { type = NavType.StringType },
-                navArgument("studentId") { type = NavType.StringType },
-                navArgument("academyId") { type = NavType.StringType },
+                navArgument("studentId")    { type = NavType.StringType },
+                navArgument("academyId")    { type = NavType.StringType },
             )
         ) { backStackEntry ->
             CameraScreen(
-                sessionId = backStackEntry.arguments?.getString("sessionId") ?: "",
+                sessionId    = backStackEntry.arguments?.getString("sessionId")    ?: "",
                 exerciseType = backStackEntry.arguments?.getString("exerciseType") ?: "SQUAT",
-                studentId = backStackEntry.arguments?.getString("studentId") ?: "",
-                academyId = backStackEntry.arguments?.getString("academyId") ?: "",
-                onFinish = { navController.popBackStack() }
+                studentId    = backStackEntry.arguments?.getString("studentId")    ?: "",
+                academyId    = backStackEntry.arguments?.getString("academyId")    ?: "",
+                onFinish     = { navController.popBackStack() }
             )
         }
 

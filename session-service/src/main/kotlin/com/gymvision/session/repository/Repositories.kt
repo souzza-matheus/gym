@@ -23,3 +23,13 @@ interface AlertRefRepository : JpaRepository<AlertRef, UUID> {
     fun findAllBySessionId(sessionId: UUID): List<AlertRef>
     fun findAllBySessionIdAndAcknowledgedFalse(sessionId: UUID): List<AlertRef>
 }
+
+interface WorkoutPlanRepository : JpaRepository<WorkoutPlan, UUID> {
+    fun findAllByStudentIdAndActiveTrue(studentId: UUID): List<WorkoutPlan>
+    fun findAllByAcademyIdAndActiveTrue(academyId: UUID): List<WorkoutPlan>
+}
+
+interface WorkoutPlanItemRepository : JpaRepository<WorkoutPlanItem, UUID> {
+    fun findAllByPlanIdOrderByOrderIndexAsc(planId: UUID): List<WorkoutPlanItem>
+    fun deleteAllByPlanId(planId: UUID)
+}

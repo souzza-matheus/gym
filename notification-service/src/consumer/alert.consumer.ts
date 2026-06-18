@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import { AlertGateway, AlertPayload } from '../gateway/alert.gateway';
+import { MailerService } from '../mailer/mailer.service';
 
 /**
  * Consome gym.alert.created do RabbitMQ e entrega via WebSocket.
@@ -16,6 +17,7 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly gateway: AlertGateway,
     private readonly config: ConfigService,
+    private readonly mailer: MailerService,
   ) {}
 
   async onModuleInit() {
@@ -36,8 +38,11 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
       try {
         this.connection = await amqp.connect(url);
         this.channel = await this.connection.createChannel();
-        await this.channel.assertQueue('gym.alert.created', { durable: true });
-        await this.channel.assertQueue('gym.exercise.result', { durable: true });
+        // Filas dedicadas: cada serviço tem a sua própria fila vinculada ao mesmo
+        // exchange, garantindo que todos recebam uma cópia de cada mensagem (fan-out).
+        await this.channel.assertQueue('notify.alert.created',   { durable: true });
+        await this.channel.assertQueue('notify.exercise.result',  { durable: true });
+        await this.channel.assertQueue('notify.session.ended',    { durable: true });
         this.channel.prefetch(10);
         this.startConsuming();
         this.logger.log('RabbitMQ conectado. Consumindo alertas...');
@@ -52,7 +57,7 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
 
   private startConsuming() {
     // ── Alertas → WebSocket para professor e aluno ────────────────────────
-    this.channel!.consume('gym.alert.created', (msg) => {
+    this.channel!.consume('notify.alert.created', (msg) => {
       if (!msg) return;
       try {
         const payload = JSON.parse(msg.content.toString());
@@ -83,7 +88,7 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
     });
 
     // ── Resultados de análise → feedback de score para o aluno ───────────
-    this.channel!.consume('gym.exercise.result', (msg) => {
+    this.channel!.consume('notify.exercise.result', (msg) => {
       if (!msg) return;
       try {
         const payload = JSON.parse(msg.content.toString());
@@ -97,6 +102,23 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
         this.channel!.ack(msg);
       } catch (err) {
         this.logger.error(`Erro ao processar result: ${err.message}`);
+        this.channel!.nack(msg, false, false);
+      }
+    });
+
+    // ── Fim de sessão → e-mail de relatório para o aluno ─────────────────
+    this.channel!.consume('notify.session.ended', (msg) => {
+      if (!msg) return;
+      try {
+        const payload = JSON.parse(msg.content.toString());
+        const data    = payload.data;
+        const to      = data.student_email ?? data.student_id;
+        if (to && to.includes('@')) {
+          this.mailer.sendSessionReport(to, data).catch(() => {});
+        }
+        this.channel!.ack(msg);
+      } catch (err) {
+        this.logger.error(`Erro ao processar session.ended: ${err.message}`);
         this.channel!.nack(msg, false, false);
       }
     });

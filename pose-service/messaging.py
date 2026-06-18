@@ -30,6 +30,11 @@ QUEUE_RESULT  = "gym.exercise.result"
 QUEUE_ALERT   = "gym.alert.created"
 QUEUE_ENDED   = "gym.session.ended"
 
+# Filas dedicadas ao notification-service (fan-out: cada serviço recebe tudo)
+QUEUE_NOTIFY_ALERT   = "notify.alert.created"
+QUEUE_NOTIFY_RESULT  = "notify.exercise.result"
+QUEUE_NOTIFY_ENDED   = "notify.session.ended"
+
 
 async def connect():
     global _connection, _channel
@@ -43,9 +48,20 @@ async def connect():
 
         # Declara o exchange topic e as filas
         exchange = await _channel.declare_exchange(EXCHANGE, aio_pika.ExchangeType.TOPIC, durable=True)
-        for q_name in (QUEUE_RESULT, QUEUE_ALERT, QUEUE_ENDED):
+
+        # Filas compartilhadas (session-service) + filas dedicadas (notification-service)
+        # Cada fila recebe uma cópia de TODOS os eventos → fan-out por routing key
+        queue_bindings = [
+            (QUEUE_RESULT,        QUEUE_RESULT),
+            (QUEUE_ALERT,         QUEUE_ALERT),
+            (QUEUE_ENDED,         QUEUE_ENDED),
+            (QUEUE_NOTIFY_ALERT,  QUEUE_ALERT),   # notification-service recebe gym.alert.created
+            (QUEUE_NOTIFY_RESULT, QUEUE_RESULT),  # notification-service recebe gym.exercise.result
+            (QUEUE_NOTIFY_ENDED,  QUEUE_ENDED),   # notification-service recebe gym.session.ended (e-mail)
+        ]
+        for q_name, routing_key in queue_bindings:
             q = await _channel.declare_queue(q_name, durable=True)
-            await q.bind(exchange, routing_key=q_name)
+            await q.bind(exchange, routing_key=routing_key)
 
         log.info("RabbitMQ conectado: %s", url)
     except Exception as e:
@@ -130,6 +146,33 @@ async def publish_result(result, academy_id: str = "unknown"):
                 "score":       result.score,
                 "phase":       result.phase.value,
             })
+
+
+async def publish_alert(
+    session_id: str,
+    student_id: str,
+    academy_id: str,
+    exercise_type: str,
+    error_type: str,
+    risk_level: str,
+    description: str,
+    joint_angle,
+    score: float,
+    phase: str,
+):
+    """Publica um único gym.alert.created — usado pelo modo vídeo."""
+    await _publish(QUEUE_ALERT, {
+        "session_id":    session_id,
+        "student_id":    student_id,
+        "academy_id":    academy_id,
+        "exercise_type": exercise_type,
+        "error_type":    error_type,
+        "risk_level":    risk_level,
+        "description":   description,
+        "joint_angle":   joint_angle,
+        "score":         score,
+        "phase":         phase,
+    })
 
 
 async def publish_session_ended(

@@ -20,21 +20,22 @@ class JwtUtils(
         Keys.hmacShaKeyFor(secret.toByteArray())
     }
 
-    fun generateAccessToken(userId: String, email: String, role: String): String =
-        buildToken(userId, email, role, expirationMs)
+    fun generateAccessToken(userId: String, email: String, role: String, academyId: String? = null): String =
+        buildToken(userId, email, role, academyId, expirationMs)
 
-    fun generateRefreshToken(userId: String, email: String, role: String): String =
-        buildToken(userId, email, role, refreshExpirationMs)
+    fun generateRefreshToken(userId: String, email: String, role: String, academyId: String? = null): String =
+        buildToken(userId, email, role, academyId, refreshExpirationMs)
 
-    private fun buildToken(userId: String, email: String, role: String, expMs: Long): String =
-        Jwts.builder()
+    private fun buildToken(userId: String, email: String, role: String, academyId: String?, expMs: Long): String {
+        val builder = Jwts.builder()
             .subject(userId)
             .claim("email", email)
             .claim("role", role)
             .issuedAt(Date())
             .expiration(Date(System.currentTimeMillis() + expMs))
-            .signWith(signingKey)
-            .compact()
+        if (academyId != null) builder.claim("academy_id", academyId)
+        return builder.signWith(signingKey).compact()
+    }
 
     fun validateToken(token: String): Boolean = runCatching {
         getClaims(token)
@@ -46,6 +47,8 @@ class JwtUtils(
     fun getEmailFromToken(token: String): String = getClaims(token)["email"] as String
 
     fun getRoleFromToken(token: String): String = getClaims(token)["role"] as String
+
+    fun getAcademyIdFromToken(token: String): String? = getClaims(token)["academy_id"] as? String
 
     private fun getClaims(token: String): Claims =
         Jwts.parser()

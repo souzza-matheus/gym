@@ -1,0 +1,487 @@
+================================================================================
+GYMVISION — SISTEMA DE ANÁLISE DE POSTURA EM EXERCÍCIOS
+Documentação para Apresentação Acadêmica
+================================================================================
+
+AUTOR: Matheus Souza
+DATA:  Junho de 2026
+
+================================================================================
+1. VISÃO GERAL DO PROJETO
+================================================================================
+
+O GymVision é um sistema completo de monitoramento e correção de postura em
+tempo real para academias. O sistema utiliza visão computacional e inteligência
+artificial para analisar os movimentos do aluno durante exercícios físicos,
+detectar erros biomecânicos e notificar o professor imediatamente.
+
+O objetivo é reduzir o risco de lesões causadas por má execução de exercícios,
+oferecendo feedback instantâneo tanto para o aluno (via app Android) quanto
+para o professor (via dashboard web).
+
+================================================================================
+2. ARQUITETURA GERAL — MICROSSERVIÇOS
+================================================================================
+
+O sistema é composto por 9 serviços independentes, todos orquestrados via
+Docker Compose:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         GYMVISION — ARQUITETURA                             │
+│                                                                             │
+│  [App Android]  ──HTTP──►  [Kong Gateway :8090]  ──►  [pose-service :8083] │
+│       │                          │                          │               │
+│       │ WebSocket                │                    [RabbitMQ]            │
+│       ▼                          │                     ┌───┴────────────┐   │
+│  [Notificações]                  ├──► [session-service]│notification-svc│   │
+│                                  ├──► [user-service]   │analytics-svc   │   │
+│                                  └──► [analytics-svc]  └────────────────┘   │
+│                                                                             │
+│  [Dashboard Web :5173]  ──────── também usa o gateway                      │
+│                                                                             │
+│  Bancos de dados:                                                           │
+│    PostgreSQL  → user-service (usuários, autenticação JWT)                  │
+│    TimescaleDB → session-service (sessões, reps, alertas por tempo)         │
+│    MongoDB     → analytics-service (progresso semanal, estatísticas)        │
+│    Redis       → cache de análises de vídeo (MD5, TTL 24h)                 │
+│    MinIO       → armazenamento de vídeos (S3-compatible)                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Comunicação assíncrona:
+  - RabbitMQ com exchange tipo TOPIC ("gymvision")
+  - Cada serviço tem fila dedicada para receber cópias dos eventos (fan-out real)
+  - Eventos: gym.alert.created → notify.alert.created, notify.exercise.result
+             gym.session.ended → notify.session.ended
+
+================================================================================
+3. SERVIÇOS — DESCRIÇÃO TÉCNICA
+================================================================================
+
+3.1 POSE-SERVICE (Python / FastAPI — porta 8083)
+────────────────────────────────────────────────
+Responsabilidade: detecção de landmarks e análise biomecânica.
+
+Tecnologias:
+  - FastAPI (API assíncrona)
+  - MediaPipe BlazePose (33 landmarks, fallback para MoveNet Thunder via TF Serving)
+  - TensorFlow Serving (GPU-ready para produção)
+
+Funcionalidades implementadas:
+  a) Endpoint de análise por frame:
+     POST /api/v1/pose/analyze
+     - Recebe imagem JPEG + exercise_type + session_id + student_id + academy_id
+     - Detecta 33 landmarks corporais
+     - Calcula ângulos articulares (joelho, quadril, tornozelo, cotovelo, pulso)
+     - Detecta a fase do movimento (STANDING / DESCENDING / BOTTOM / ASCENDING)
+     - Executa análise específica do exercício
+     - Publica alerta no RabbitMQ se risco MEDIUM ou HIGH
+     - Retorna landmarks + análise em < 200ms
+
+  b) Exercícios suportados com detecção de erros:
+     ┌─────────────────┬──────────────────────────────────────────────────────┐
+     │ Exercício       │ Erros detectados                                     │
+     ├─────────────────┼──────────────────────────────────────────────────────┤
+     │ Squat (Agacha.) │ Profundidade insuficiente, joelho para dentro        │
+     │                 │ (valgus), coluna inclinada (frontal E lateral)       │
+     ├─────────────────┼──────────────────────────────────────────────────────┤
+     │ Deadlift        │ Lombar arredondada, quadril não estendido no topo    │
+     ├─────────────────┼──────────────────────────────────────────────────────┤
+     │ Lunge           │ Ângulo do joelho fora do ideal, tronco inclinado     │
+     ├─────────────────┼──────────────────────────────────────────────────────┤
+     │ Bench Press     │ Cotovelo muito aberto (risco de ombro), amplitude    │
+     │                 │ insuficiente, pulso dobrado lateralmente              │
+     ├─────────────────┼──────────────────────────────────────────────────────┤
+     │ Bent-over Row   │ Lombar arredondada, remada incompleta                │
+     └─────────────────┴──────────────────────────────────────────────────────┘
+
+  c) Detecção de orientação de câmera:
+     - Detecta automaticamente se a câmera está LATERAL, FRONTAL ou em ângulo
+     - Regras perspectiva-dependentes são ativadas/desativadas conforme orientação
+     - Knee cave: só detectado com câmera frontal (desvio medial visível)
+     - Knee over toe: só detectado com câmera lateral (profundidade sagital)
+     - Inclinação sagital do tronco: usa coordenada Z do MediaPipe em câmera frontal
+
+  d) Sistema de score:
+     - Base: 100 pontos por frame
+     - Penalidade erro HIGH: -25 pts
+     - Penalidade erro MEDIUM: -15 pts
+     - Penalidade erro LOW: -5 pts
+     - Fase UNKNOWN: score = 0
+
+  e) Análise de vídeo completo:
+     POST /api/v1/pose/analyze-video        → síncrono (vídeo curto)
+     POST /api/v1/pose/analyze-video/async  → assíncrono (retorna job_id)
+     GET  /api/v1/pose/analyze-video/status/{job_id} → polling de status
+
+  f) Cache Redis:
+     - Hash MD5 do arquivo de vídeo como chave
+     - TTL 24 horas — vídeos idênticos não são reprocessados
+     - Hit rate típico em laboratório: ~40% em treinos repetitivos
+
+  g) Armazenamento MinIO:
+     - Vídeos enviados são salvos em bucket "gymvision-videos"
+     - Chave: {academy_id}/{session_id}/{timestamp}.mp4
+     - URLs pré-assinadas (válidas 7 dias) para acesso posterior
+
+  h) Fila assíncrona de vídeo:
+     - asyncio.Queue com máximo 20 jobs simultâneos
+     - Worker único (evita sobrecarga de GPU)
+     - Status do job persistido no Redis (TTL 1h)
+
+  i) Logs estruturados JSON:
+     - Campos: timestamp, level, message, session_id, student_id
+     - Compatível com Grafana/Loki para produção
+
+3.2 SESSION-SERVICE (Kotlin / Spring Boot — porta 8084)
+────────────────────────────────────────────────────────
+Responsabilidade: ciclo de vida das sessões de treino.
+
+Tecnologias:
+  - Spring Boot 3 + Spring Data JPA
+  - PostgreSQL (TimescaleDB) com Flyway migrations
+  - RabbitMQ consumer/publisher
+
+Funcionalidades:
+  - CRUD de sessões (criar, iniciar, encerrar)
+  - Registro de reps e alertas por sessão
+  - Publica gym.session.ended ao encerrar
+  - Migrations: V2 (errors TEXT), V3 (score DOUBLE PRECISION)
+
+3.3 NOTIFICATION-SERVICE (Node.js / NestJS — porta 8085)
+──────────────────────────────────────────────────────────
+Responsabilidade: notificações em tempo real.
+
+Tecnologias:
+  - NestJS + Socket.IO (WebSocket)
+  - Nodemailer (e-mail pós-sessão)
+  - Web Push API (notificações no navegador)
+
+Funcionalidades:
+  - Consumer RabbitMQ → forward para professores via WebSocket
+  - Rooms: academy:{id} — professor entra na sala da sua academia
+  - Alertas em tempo real: < 500ms do frame ao professor
+  - E-mail HTML automático ao encerrar sessão (score, reps, erros, comparativo)
+  - Web Push: notificação no browser mesmo com aba fechada (VAPID keys)
+
+3.4 USER-SERVICE (Node.js — porta 8081)
+────────────────────────────────────────
+  - Cadastro e autenticação de usuários (STUDENT / PROFESSOR / ADMIN)
+  - JWT com refresh token automático
+  - Endpoints: /register, /login, /refresh, /me, /users
+
+3.5 ANALYTICS-SERVICE (Python / FastAPI — porta 8086)
+───────────────────────────────────────────────────────
+Responsabilidade: histórico, progresso e gamificação.
+
+  - Consumer gym.session.ended → persiste resumos no MongoDB
+  - Progresso semanal por aluno (score médio, erros dominantes)
+  - Estatísticas da academia (alunos ativos, top erros, por exercício)
+  - Leaderboard: ranking de alunos por score médio
+  - Gamificação: pontos, nível, streak e 12 conquistas desbloqueáveis
+
+  Sistema de pontos:
+    - Cada sessão contribui com avg_score pontos ao total
+    - Nível = pontos ÷ 500
+    - Streak = dias consecutivos com ao menos 1 sessão
+
+  Conquistas (exemplos):
+    🏃 Primeira Sessão   ✅ Técnica Perfeita   🔥 10 Sessões
+    💪 50 Sessões        📅 3 Dias Seguidos    🗓️ Semana Completa
+    💯 100 Reps          🚀 1.000 Reps         ⭐ Score Perfeito
+    🥈 Nível 5           🥇 Nível 10           🏆 Mestre da Forma
+
+3.6 API GATEWAY (Kong — porta 8090)
+─────────────────────────────────────
+  - Roteamento de todas as requisições
+  - Rate limiting:
+      /api/v1/pose/analyze: 300 req/min
+      /api/v1/pose/analyze-video: 10 req/min, 50/hora (proteção contra abuso)
+  - Ponto único de entrada para app e dashboard
+
+================================================================================
+4. APP ANDROID
+================================================================================
+
+Tecnologias:
+  - Kotlin + Jetpack Compose + Material 3
+  - CameraX (câmera em tempo real)
+  - Retrofit + OkHttp (API REST)
+  - Socket.IO (alertas WebSocket)
+  - ML Kit BlazePose (análise offline, TFLite on-device)
+  - WorkManager (sincronização em background)
+  - TextToSpeech PT-BR (feedback de voz)
+
+Telas implementadas:
+
+  4.1 LOGIN
+      - Autenticação JWT com refresh token automático
+      - Sessão persistida em SharedPreferences
+
+  4.2 SESSÕES (tela principal)
+      - Lista de sessões anteriores com score, reps e exercício
+      - Criar nova sessão: seleciona exercício (5 tipos disponíveis)
+      - Navega para guia de câmera antes de iniciar
+
+  4.3 GUIA DE CÂMERA (CameraGuideScreen)
+      - Tela exibida ANTES de iniciar cada sessão
+      - Ícone animado do celular girando 0° → -90° (vertical → horizontal)
+      - Dicas específicas por exercício (ex: "Posicione a câmera lateralmente
+        na altura do quadril para o squat")
+      - Botões: "Entendido — Iniciar sessão" e "Pular"
+
+  4.4 CÂMERA / SESSÃO AO VIVO (CameraScreen)
+      - Preview em tempo real com overlay de esqueleto (Canvas sobre câmera)
+      - Score gauge circular atualizado a cada frame (até 5fps de análise)
+      - Chip de fase do movimento (SUBINDO / DESCENDO / FUNDO / EM PÉ)
+      - Contador de repetições (transição BOTTOM → STANDING)
+      - Banner de alerta deslizante para erros HIGH/MEDIUM
+      - Feedback de voz (TextToSpeech PT-BR) para cada alerta
+      - Modo OFFLINE: faixa laranja "OFFLINE · análise local ativa"
+        aparece automaticamente quando sem internet
+
+  4.5 MODO OFFLINE (novidade)
+      - Quando sem internet, o app NÃO para de funcionar
+      - ML Kit BlazePose detecta poses diretamente no dispositivo (TFLite)
+      - Os mesmos algoritmos de análise rodam localmente em Kotlin
+      - Frames e análises são salvos em banco SQLite local
+      - Ao voltar online: WorkManager sincroniza automaticamente em background
+      - Modelo BlazePose pré-carregado na instalação do app (sem download runtime)
+
+  4.6 PROGRESSO (ProgressScreen)
+      - Gráfico de barras: score semanal (8 semanas)
+      - Estatísticas: total de sessões, reps, score médio, melhor score
+      - Top 5 erros mais frequentes com barra de progresso proporcional
+      - Lista das 20 sessões mais recentes
+
+  4.7 CONQUISTAS E RANKING (AchievementsScreen)
+      - Card de nível com barra de progresso até o próximo nível
+      - Streak de dias consecutivos com ícone de chama 🔥
+      - Grid de badges de conquistas desbloqueadas
+      - Ranking da academia: top 10 alunos por score médio
+        (medalhas 🥇🥈🥉 para os 3 primeiros)
+
+  4.8 TESTE DE VÍDEO (VideoTestScreen)
+      - Seleciona vídeo do armazenamento do celular
+      - Envia para análise completa no servidor
+      - Exibe relatório: score por frame, reps detectadas, top erros
+      - Playback sincronizado com overlay de pose
+
+  4.9 PERFIL
+      - Dados do usuário via user-service /me
+      - Logout com limpeza de tokens
+
+================================================================================
+5. DASHBOARD WEB (Professor)
+================================================================================
+
+Tecnologia: React 18 + Vite + Tailwind CSS (porta 5173)
+
+Acesso: http://localhost:5173
+Login:  professor@gymvision.com / senha123
+
+Abas disponíveis:
+
+  5.1 ALERTAS (TeacherDashboard)
+      - Recebe alertas em tempo real via WebSocket (Socket.IO)
+      - Sala RabbitMQ: academy:{id} — só alertas da academia do professor
+      - Mapa de calor de erros: tabela erro × dia da semana (cor amarelo → laranja → vermelho)
+      - Lista cronológica de alertas com exercício, aluno, tipo de erro e score
+      - Botão "Ativar notificações" para Web Push (mesmo com aba fechada)
+
+  5.2 TESTAR VÍDEO (VideoTestPage)
+      - Upload de vídeo MP4/MOV/AVI
+      - Seleciona exercício e taxa de análise (5/10/20/30fps)
+      - Exibe relatório completo: gráfico SVG de score ao longo do tempo,
+        tabela de reps, alertas ao professor, frames críticos
+
+  5.3 PROGRESSO (StudentProgressPage)
+      - Gráfico SVG de evolução do score semana a semana
+      - Filtro por exercício
+      - Cards de resumo: score médio, sessões, reps totais
+      - Lista de sessões ordenada da mais recente
+
+  5.4 ALUNOS (StudentsPage)
+      - Lista todos os alunos da academia com busca por nome/e-mail
+      - Formulário de cadastro de novo aluno (nome, e-mail, senha inicial)
+      - Avatar com inicial do nome
+
+  5.5 RANKING (LeaderboardPage)
+      - Tabela de ranking por score médio com medalhas 🥇🥈🥉
+      - ScoreBadge colorido: verde (≥80) / amarelo (≥50) / vermelho (<50)
+      - Catálogo visual das 12 conquistas disponíveis com ícones e critérios
+      - Explicação da fórmula de pontuação
+
+================================================================================
+6. INFRAESTRUTURA E DEVOPS
+================================================================================
+
+  6.1 Docker Compose
+      - 12 containers orquestrados com healthchecks
+      - Dependências explícitas (condition: service_healthy)
+      - Todos os serviços em rede interna "gymvision-net"
+
+  Containers em produção (dev local):
+    gymvision-pose-svc     (healthy) — Python/FastAPI
+    gymvision-session-svc  (healthy) — Kotlin/Spring Boot
+    gymvision-notify-svc   (up)      — Node.js/NestJS
+    gymvision-analytics-svc(up)      — Python/FastAPI
+    gymvision-user-svc     (up)      — Node.js
+    gymvision-gateway      (healthy) — Kong
+    gymvision-rabbitmq     (healthy) — RabbitMQ 3.12
+    gymvision-timescale    (healthy) — TimescaleDB (PostgreSQL)
+    gymvision-postgres     (healthy) — PostgreSQL 15
+    gymvision-mongodb      (healthy) — MongoDB 7
+    gymvision-redis        (healthy) — Redis 7
+    gymvision-minio        (healthy) — MinIO (S3-compatible)
+
+  6.2 Rate Limiting (Kong)
+      - Endpoint de análise de frame: 300 req/min por IP
+      - Endpoint de análise de vídeo: 10 req/min, 50/hora por IP
+      - Proteção contra abuso sem impacto no uso normal
+
+================================================================================
+7. QUALIDADE E TESTES
+================================================================================
+
+  7.1 Testes Unitários — pose-service
+      Arquivo: pose-service/tests/test_exercise_analyzer.py
+      34 testes cobrindo:
+        - detect_phase(): 6 cenários (STANDING, BOTTOM, DESCENDING, ASCENDING, None)
+        - calculate_score(): 7 cenários (sem erro, HIGH, MEDIUM, LOW, múltiplos, UNKNOWN, floor)
+        - _analyze_squat(): 7 casos (back angle MEDIUM/HIGH/ok, knee cave frontal/lateral, depth)
+        - _analyze_deadlift(): 3 casos (back rounded, back ok, hips too high)
+        - _analyze_bench_press(): 3 casos (elbow flare, sem flare, wrist bent)
+        - _analyze_bent_over_row(): 3 casos (back rounded MEDIUM/HIGH, back ok)
+        - ExerciseAnalyzer.analyze(): 5 testes de integração (SQUAT, BENCH, ROW,
+          landmarks insuficientes, has_alert)
+
+      Resultado: 34/34 PASSED ✓
+
+  7.2 Validação com vídeo real
+      Vídeo: "Bad squat form!!! It needs help!! #shorts.mp4" (câmera frontal)
+      Resultado:
+        - 68 frames analisados em 11.3 segundos
+        - BACK_NOT_STRAIGHT [HIGH] detectado em 33.8% dos frames
+        - KNEE_CAVE_RIGHT [MEDIUM] detectado em 23.5% dos frames
+        - Score mínimo: 60.0 (fase BOTTOM com 2 erros simultâneos)
+        - Primeiro alerta ao professor: < 1.8s após início do vídeo
+
+  7.3 Validação end-to-end
+      - Login → criar sessão → analisar frames → alertas via WebSocket
+        → dashboard recebe em tempo real → e-mail pós-sessão
+      - Latência ponta-a-ponta (frame → professor): < 500ms
+
+================================================================================
+8. FLUXO COMPLETO — CASO DE USO
+================================================================================
+
+1. Professor abre o dashboard (http://localhost:5173), faz login
+2. Aluno abre o app Android, faz login e cria uma sessão (ex: Squat)
+3. App exibe guia de câmera: dicas + animação de posicionamento
+4. Aluno posiciona o celular e toca "Iniciar sessão"
+5. CameraX captura frames a 30fps; app analisa 1 frame a cada 200ms
+   ├── COM INTERNET: frame enviado via HTTP ao pose-service
+   │     → MediaPipe detecta landmarks
+   │     → exercise_analyzer calcula ângulos e detecta erros
+   │     → se erro HIGH/MEDIUM: publica alerta no RabbitMQ
+   │     → notification-service envia via WebSocket ao professor
+   │     → app recebe landmarks e exibe overlay do esqueleto
+   │     → app recebe alerta e: exibe banner + fala em voz PT-BR
+   └── SEM INTERNET: ML Kit BlazePose detecta landmarks no dispositivo
+         → mesma análise roda em Kotlin localmente
+         → frame salvo no SQLite local
+         → ao voltar online: WorkManager sincroniza em background
+6. Professor vê alerta no dashboard em < 500ms
+   - Badge de risco colorido (VERMELHO = HIGH, AMARELO = MEDIUM)
+   - Mapa de calor atualizado em tempo real
+   - Notificação no browser mesmo com aba fechada (Web Push)
+7. Aluno finaliza sessão → session-service encerra e publica evento
+8. analytics-service persiste resumo no MongoDB
+9. notification-service envia e-mail HTML ao professor (score, reps, erros)
+10. Aluno vê seu progresso na aba "Progresso" do app
+11. Professor vê ranking atualizado no dashboard → aba "Ranking"
+
+================================================================================
+9. TECNOLOGIAS UTILIZADAS (RESUMO)
+================================================================================
+
+Backend:
+  Python 3.11, FastAPI, MediaPipe, TensorFlow Serving, asyncio
+  Kotlin 1.9, Spring Boot 3, Hibernate/JPA, Flyway
+  Node.js, NestJS, Socket.IO, Nodemailer
+
+Frontend / Mobile:
+  Android: Kotlin, Jetpack Compose, CameraX, ML Kit, WorkManager
+  Web: React 18, Vite, TypeScript, Tailwind CSS
+
+Infraestrutura:
+  Docker, Docker Compose, Kong Gateway
+  RabbitMQ, TimescaleDB, PostgreSQL, MongoDB, Redis, MinIO
+
+Comunicação:
+  REST (HTTP/JSON), WebSocket (Socket.IO), AMQP (RabbitMQ)
+
+Segurança:
+  JWT com refresh token, Rate limiting no gateway, HTTPS-ready
+
+================================================================================
+10. DIFERENCIAIS TÉCNICOS
+================================================================================
+
+  ► Análise multi-ângulo: o sistema detecta automaticamente a orientação da
+    câmera (frontal, lateral, angled) e adapta as regras biomecânicas.
+    Erros que só são visíveis em câmera frontal (knee cave) são ignorados
+    quando a câmera está de lado — evitando falsos positivos.
+
+  ► Resiliência offline total: o app Android continua funcionando sem internet,
+    com análise de qualidade similar ao modo online (mesmo modelo BlazePose),
+    e sincroniza automaticamente quando a conexão volta.
+
+  ► Fan-out garantido: cada serviço consome sua própria fila no RabbitMQ.
+    Se o notification-service estiver reiniciando, as mensagens ficam na fila
+    e são entregues quando o serviço voltar — sem perda de alertas.
+
+  ► Cache inteligente: análises de vídeo são cacheadas por hash MD5.
+    O mesmo vídeo (mesmo arquivo) analisado uma segunda vez retorna em < 10ms
+    independente da duração — sem reprocessamento.
+
+  ► Processamento assíncrono de vídeo: vídeos longos não bloqueiam o servidor.
+    O cliente recebe um job_id imediatamente e faz polling até o resultado ficar
+    pronto — o servidor processa em background com fila asyncio.
+
+  ► Arquitetura extensível: adicionar um novo exercício requer apenas:
+    - 1 função _analyze_X() em exercise_analyzer.py (Python)
+    - 1 valor no enum ExerciseType (Python e Kotlin)
+    - Mapeamento de labels/ícones em RiskMappers.kt (Android)
+    Todo o restante (routing, score, alertas, dashboard) funciona automaticamente.
+
+================================================================================
+11. MÉTRICAS DO PROJETO
+================================================================================
+
+  Linhas de código escritas:     ~8.000 linhas (estimativa)
+  Serviços implementados:        9 microsserviços
+  Telas Android:                 10 telas completas
+  Páginas no dashboard:          5 páginas
+  Exercícios suportados:         5 (Squat, Deadlift, Lunge, Bench Press, Row)
+  Tipos de erro detectados:      16 (knee cave, back angle, wrist bent, etc.)
+  Testes automatizados:          34 testes unitários (100% passando)
+  Containers Docker:             12
+  Conquistas gamificadas:        12
+  Latência de alerta (p50):      < 500ms (frame → professor)
+
+================================================================================
+12. POSSÍVEIS EVOLUÇÕES FUTURAS
+================================================================================
+
+  21. Plano de treino integrado (professor cria plano → app monitora execução)
+  22. Multi-tenancy completo (isolamento por academia em todas as tabelas)
+  23. Relatório PDF mensal por aluno (gerado automaticamente no dia 1)
+  24. Modelo de IA próprio (fine-tuning sobre dataset de erros reais anotados)
+  25. App iOS (Swift/SwiftUI, reutilizando todo o backend)
+  26. Integração com wearables (frequência cardíaca + fadiga muscular)
+  27. Planos de assinatura (Stripe, diferentes níveis de acesso)
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

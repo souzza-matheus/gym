@@ -12,6 +12,12 @@ interface UserRepository : JpaRepository<User, UUID> {
     fun findByEmail(email: String): User?
     fun existsByEmail(email: String): Boolean
     fun findAllByAcademyIdAndActiveTrue(academyId: UUID): List<User>
+    fun findAllByAcademyIdAndRoleAndActiveTrue(academyId: UUID, role: com.gymvision.user.model.UserRole): List<User>
+}
+
+interface AcademyRepository : JpaRepository<com.gymvision.user.model.Academy, UUID> {
+    fun findByInviteCode(inviteCode: String): com.gymvision.user.model.Academy?
+    fun existsByName(name: String): Boolean
 }
 
 interface RefreshTokenRepository : JpaRepository<RefreshToken, UUID> {
@@ -24,4 +30,8 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, UUID> {
     @Modifying
     @Query("DELETE FROM RefreshToken r WHERE r.expiresAt < :now OR r.revoked = true")
     fun deleteExpiredAndRevoked(now: Instant): Int
+
+    @Modifying
+    @Query("DELETE FROM RefreshToken r WHERE r.user.id = :userId")
+    fun deleteAllByUserId(userId: UUID): Int
 }

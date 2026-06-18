@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from exercise_analyzer import ExerciseAnalyzer
+from ai_exercise_analyzer import ExerciseAnalyzer
 from models import ExerciseType, MovementPhase, RiskLevel
 
 log = logging.getLogger(__name__)

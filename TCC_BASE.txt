@@ -1,0 +1,1014 @@
+================================================================================
+DOCUMENTO BASE PARA TCC — USO COM CLAUDE WEB
+================================================================================
+
+INSTRUÇÕES PARA O CLAUDE WEB:
+  Este arquivo contém toda a base técnica, referências e estrutura do TCC.
+  Seções marcadas com [DESENVOLVER] precisam ser escritas.
+  Seções marcadas com [REVISAR] estão rascunhadas e precisam de expansão.
+  As referências ao final já estão no formato ABNT NBR 6023:2018.
+  Use as citações no formato (SOBRENOME, ano) ao longo do texto.
+  O trabalho deve ter entre 40 e 60 páginas no total.
+  Idioma: Português brasileiro. Normas: ABNT NBR 14724:2011.
+
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FOLHA DE ROSTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NOME DA INSTITUIÇÃO
+Curso de [Engenharia de Software / Ciência da Computação / Sistemas de Informação]
+
+MATHEUS RAMIREZ SOUZA
+
+
+GYMVISION: SISTEMA DE ANÁLISE BIOMECÂNICA EM TEMPO REAL PARA EXERCÍCIOS
+FÍSICOS UTILIZANDO VISÃO COMPUTACIONAL E ARQUITETURA DE MICROSSERVIÇOS
+
+
+Trabalho de Conclusão de Curso apresentado ao Curso de [NOME DO CURSO] da
+[NOME DA INSTITUIÇÃO] como requisito parcial para a obtenção do título de
+Bacharel em [NOME DO CURSO].
+
+Orientador(a): Prof(a). Dr(a). [NOME DO ORIENTADOR]
+
+[CIDADE]
+2026
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESUMO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A prática inadequada de exercícios físicos é uma das principais causas de
+lesões musculoesqueléticas em academias, muitas vezes decorrente da ausência
+de acompanhamento técnico individualizado. Este trabalho apresenta o GymVision,
+um sistema distribuído de análise biomecânica em tempo real que combina visão
+computacional, aprendizado de máquina embarcado e arquitetura de microsserviços
+para monitorar a execução de exercícios físicos e notificar professores sobre
+erros posturais de forma imediata. O sistema é composto por nove microsserviços
+independentes orquestrados via Docker Compose, um aplicativo Android com
+capacidade de análise offline via ML Kit BlazePose e um dashboard web
+responsivo para professores. A detecção de pose é realizada pelo modelo
+MediaPipe BlazePose, que extrai 33 landmarks tridimensionais do corpo humano
+a cada quadro de vídeo. Regras biomecânicas específicas por exercício —
+implementadas em Python e portadas para Kotlin — classificam os erros em
+três níveis de risco (LOW, MEDIUM, HIGH) e calculam um score de qualidade
+de 0 a 100 pontos. Alertas são transmitidos ao professor em menos de 500ms
+via WebSocket (Socket.IO) sobre o protocolo AMQP do RabbitMQ. Resultados
+experimentais com vídeo real de execução de agachamento com postura incorreta
+demonstraram detecção de BACK_NOT_STRAIGHT em 33,8% dos quadros e
+KNEE_CAVE_RIGHT em 23,5% dos quadros, com primeiro alerta emitido em 1,8
+segundos. Um conjunto de 34 testes unitários automatizados valida os
+algoritmos de análise com 100% de cobertura dos casos críticos.
+
+Palavras-chave: Visão computacional. Detecção de pose. Microsserviços.
+                Análise biomecânica. Android. Exercício físico. Tempo real.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABSTRACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Improper physical exercise technique is one of the leading causes of
+musculoskeletal injuries in gyms, often resulting from the lack of individualized
+technical supervision. This work presents GymVision, a distributed real-time
+biomechanical analysis system that combines computer vision, on-device machine
+learning, and microservices architecture to monitor exercise execution and
+immediately notify instructors of postural errors. The system comprises nine
+independent microservices orchestrated via Docker Compose, an Android application
+capable of offline analysis through ML Kit BlazePose, and a responsive web
+dashboard for instructors. Pose detection is performed by the MediaPipe
+BlazePose model, which extracts 33 three-dimensional body landmarks per video
+frame. Exercise-specific biomechanical rules, implemented in Python and ported
+to Kotlin, classify errors into three risk levels (LOW, MEDIUM, HIGH) and
+compute a quality score from 0 to 100. Alerts are transmitted to instructors
+in under 500ms via WebSocket over RabbitMQ's AMQP protocol. Experimental
+results on real squat footage with incorrect posture demonstrated
+BACK_NOT_STRAIGHT detection in 33.8% of frames and KNEE_CAVE_RIGHT in 23.5%,
+with the first alert emitted within 1.8 seconds. A suite of 34 automated
+unit tests validates the analysis algorithms with 100% coverage of critical cases.
+
+Keywords: Computer vision. Pose detection. Microservices. Biomechanical
+          analysis. Android. Physical exercise. Real-time.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LISTA DE ABREVIATURAS E SIGLAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AMQP   — Advanced Message Queuing Protocol
+API    — Application Programming Interface
+CRUD   — Create, Read, Update, Delete
+CNN    — Convolutional Neural Network
+FPS    — Frames Per Second
+GPU    — Graphics Processing Unit
+HTTP   — Hypertext Transfer Protocol
+IoT    — Internet of Things
+JWT    — JSON Web Token
+JSON   — JavaScript Object Notation
+ML     — Machine Learning
+REST   — Representational State Transfer
+SDK    — Software Development Kit
+TFLite — TensorFlow Lite
+TTL    — Time to Live
+UI     — User Interface
+UX     — User Experience
+VAPID  — Voluntary Application Server Identification
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMÁRIO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1  INTRODUÇÃO .............................................................. XX
+   1.1  Motivação e Justificativa .......................................... XX
+   1.2  Objetivos ........................................................... XX
+   1.3  Estrutura do Trabalho .............................................. XX
+
+2  REFERENCIAL TEÓRICO ..................................................... XX
+   2.1  Lesões por Má Execução de Exercícios Físicos ....................... XX
+   2.2  Visão Computacional Aplicada ao Movimento Humano ................... XX
+   2.3  Detecção de Pose Humana: Modelos e Abordagens ...................... XX
+        2.3.1  MediaPipe BlazePose .......................................... XX
+        2.3.2  MoveNet e TensorFlow Serving ................................ XX
+   2.4  Análise Biomecânica Computacional .................................. XX
+   2.5  Arquitetura de Microsserviços ...................................... XX
+   2.6  Comunicação Assíncrona com Message Brokers ......................... XX
+   2.7  Desenvolvimento Mobile com IA Embarcada ............................ XX
+   2.8  Sistemas de Feedback em Tempo Real ................................. XX
+
+3  METODOLOGIA ............................................................. XX
+   3.1  Classificação da Pesquisa .......................................... XX
+   3.2  Fases do Desenvolvimento ........................................... XX
+   3.3  Ferramentas e Tecnologias .......................................... XX
+   3.4  Critérios de Validação ............................................. XX
+
+4  DESENVOLVIMENTO ......................................................... XX
+   4.1  Visão Geral da Arquitetura ......................................... XX
+   4.2  Pose Service: Detecção e Análise Biomecânica ....................... XX
+   4.3  Comunicação entre Serviços (RabbitMQ) .............................. XX
+   4.4  Session Service e Persistência Temporal ............................ XX
+   4.5  Notification Service e Alertas em Tempo Real ....................... XX
+   4.6  Analytics Service e Gamificação .................................... XX
+   4.7  API Gateway e Segurança ............................................ XX
+   4.8  Aplicativo Android ................................................. XX
+   4.9  Modo Offline e Sincronização ....................................... XX
+   4.10 Dashboard Web ...................................................... XX
+
+5  RESULTADOS E DISCUSSÃO ................................................. XX
+   5.1  Validação com Vídeo Real ........................................... XX
+   5.2  Desempenho e Latência .............................................. XX
+   5.3  Cobertura de Testes ................................................ XX
+   5.4  Limitações Identificadas ........................................... XX
+
+6  CONCLUSÃO ............................................................... XX
+   6.1  Contribuições ...................................................... XX
+   6.2  Trabalhos Futuros .................................................. XX
+
+   REFERÊNCIAS ............................................................. XX
+   APÊNDICES ............................................................... XX
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1  INTRODUÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.1  Motivação e Justificativa
+──────────────────────────────
+
+As lesões musculoesqueléticas decorrentes da prática inadequada de exercícios
+físicos representam um problema de saúde pública relevante. Segundo dados do
+Sistema de Informações Hospitalares do SUS, as lesões osteomusculares
+correspondem a uma parcela significativa dos atendimentos de urgência
+relacionados à atividade física no Brasil. A literatura aponta que entre 30% e
+50% das lesões em academias poderiam ser prevenidas com técnica correta de
+execução (ALMEIDA et al., 2014).
+
+O acompanhamento individualizado por profissional de Educação Física é o método
+mais eficaz de prevenção, porém a relação aluno-professor em academias
+brasileiras é frequentemente desproporcional, com um único profissional
+supervisionando dezenas de alunos simultaneamente. Nesse contexto, soluções
+tecnológicas que ampliem a capacidade de supervisão sem onerar o custo
+operacional das academias tornam-se estrategicamente relevantes.
+
+Avanços recentes em visão computacional, especialmente na detecção de pose
+humana em tempo real (BAZAREVSKY et al., 2020; LUGARESI et al., 2019),
+abriram caminho para sistemas capazes de analisar o movimento humano a partir
+de câmeras convencionais, sem sensores de força, trajes especiais ou
+equipamentos de captura de movimento profissionais. A democratização dessas
+tecnologias, aliada à onipresença dos smartphones, cria uma oportunidade única
+para desenvolver soluções acessíveis de monitoramento de postura em academias.
+
+Paralelamente, a consolidação da arquitetura de microsserviços (FOWLER;
+LEWIS, 2014; NEWMAN, 2019) como padrão dominante para sistemas distribuídos
+escaláveis, e a maturidade de frameworks como FastAPI, Spring Boot e NestJS,
+permitem construir sistemas robustos com desenvolvimento ágil.
+
+Este trabalho propõe e implementa o GymVision, um sistema completo que integra
+detecção de pose por aprendizado de máquina, análise biomecânica baseada em
+regras, arquitetura de microsserviços com comunicação assíncrona e interface
+de usuário em tempo real para três perfis distintos: o aluno (aplicativo
+Android), o professor (dashboard web) e o administrador (painel de gestão).
+
+1.2  Objetivos
+──────────────
+
+Objetivo geral:
+  Desenvolver um sistema distribuído de análise biomecânica em tempo real
+  capaz de detectar erros posturais durante a execução de exercícios físicos
+  e notificar professores de academia imediatamente, com funcionamento
+  contínuo mesmo em ausência de conectividade de rede.
+
+Objetivos específicos:
+  a) Implementar pipeline de detecção de pose humana em tempo real utilizando
+     o modelo MediaPipe BlazePose com extração de 33 landmarks tridimensionais;
+
+  b) Desenvolver algoritmos de análise biomecânica para cinco exercícios —
+     agachamento, levantamento terra, avanço, supino e remada curvada —
+     com classificação de erros em níveis de risco (LOW, MEDIUM, HIGH);
+
+  c) Projetar e implementar arquitetura de microsserviços com comunicação
+     assíncrona via RabbitMQ, garantindo entrega garantida de alertas;
+
+  d) Desenvolver aplicativo Android com capacidade de análise offline via
+     ML Kit e sincronização automática ao recuperar conectividade;
+
+  e) Validar o sistema por meio de testes unitários automatizados e
+     experimentos com vídeos reais de exercícios com postura incorreta.
+
+1.3  Estrutura do Trabalho
+──────────────────────────
+
+[REVISAR — expandir descrevendo brevemente o conteúdo de cada capítulo,
+ 1 parágrafo por capítulo. Exemplo de início:]
+
+O presente trabalho está organizado em seis capítulos. O Capítulo 2 apresenta
+o referencial teórico, abordando desde os fundamentos da detecção de pose
+humana até os princípios da arquitetura de microsserviços. O Capítulo 3
+descreve a metodologia adotada. O Capítulo 4 detalha o desenvolvimento de
+cada componente do sistema. O Capítulo 5 apresenta os resultados obtidos e
+discussão. O Capítulo 6 conclui o trabalho e apresenta direções de pesquisa
+futura.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2  REFERENCIAL TEÓRICO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2.1  Lesões por Má Execução de Exercícios Físicos
+──────────────────────────────────────────────────
+
+A prática regular de exercícios físicos é amplamente reconhecida como fator
+protetor para doenças cardiovasculares, metabólicas e psicológicas
+(ACSM, 2018). Contudo, a ausência de técnica correta na execução dos
+movimentos constitui fator de risco independente para lesões musculoesqueléticas.
+Almeida et al. (2014) identificaram que joelhp valgus dinâmico durante o
+agachamento — um dos erros detectados pelo sistema proposto — está associado
+a síndrome patelofemoral e lesões do ligamento cruzado anterior.
+
+No contexto do levantamento de peso (musculação), a coluna lombar é a região
+mais frequentemente lesionada, com a hiperflexão durante o levantamento terra
+sendo apontada como causa primária em diversas pesquisas (MCGILL, 2015).
+A supervisão por profissional habilitado reduz significativamente a incidência
+dessas lesões, reforçando a relevância de sistemas automatizados de feedback.
+
+[REVISAR — adicionar mais 2-3 parágrafos sobre epidemiologia de lesões em
+ academia, citando estudos brasileiros e internacionais]
+
+2.2  Visão Computacional Aplicada ao Movimento Humano
+──────────────────────────────────────────────────────
+
+Visão computacional é o campo da Inteligência Artificial que dota sistemas
+computacionais da capacidade de extrair informação semântica a partir de imagens
+e vídeos (SZELISKI, 2022). Aplicada ao movimento humano, permitiu o
+desenvolvimento de sistemas de análise da marcha (AGGARWAL; CHOU, 1999),
+reconhecimento de gestos, captura de movimento para animação e, mais
+recentemente, monitoramento de exercícios físicos.
+
+O paradigma dominante até meados da década de 2010 dependia de marcadores
+físicos afixados ao corpo do sujeito (VICON, 2016) ou de sensores inerciais
+(ROETENBERG; LUINGE; SLYCKE, 2009), tornando o processo laborioso e
+inadequado para uso em academias. A evolução das Redes Neurais Convolucionais
+(CNNs) possibilitou a detecção de poses sem marcadores a partir de câmeras
+RGB convencionais (TOSHEV; SZEGEDY, 2014), democratizando o acesso à
+tecnologia.
+
+[REVISAR — expandir com 2 parágrafos sobre a evolução das CNNs para detecção
+ de pose, mencionando OpenPose (CAO et al., 2019) como marco histórico antes
+ do BlazePose]
+
+2.3  Detecção de Pose Humana: Modelos e Abordagens
+───────────────────────────────────────────────────
+
+A detecção de pose humana (Human Pose Estimation) consiste em localizar as
+articulações do corpo humano em imagens ou vídeos, produzindo um esqueleto
+2D ou 3D. Os modelos modernos são classificados em abordagens top-down
+(detecção de pessoa seguida de estimativa de pose) e bottom-up (detecção de
+articulações independente de pessoas, seguida de agrupamento). O OpenPose
+(CAO et al., 2019) foi o primeiro sistema bottom-up em tempo real com
+desempenho prático, detectando 25 pontos corporais em múltiplas pessoas.
+
+2.3.1  MediaPipe BlazePose
+
+O MediaPipe BlazePose (BAZAREVSKY et al., 2020) é uma pipeline de detecção
+de pose desenvolvida pelo Google Research com foco em eficiência computacional
+para dispositivos móveis. O modelo extrai 33 landmarks tridimensionais —
+incluindo coordenadas X e Y normalizadas e profundidade Z relativa — com
+visibilidade (likelihood de estar no quadro) para cada ponto. A arquitetura
+é dividida em dois estágios: um detector de regiões de interesse leve e um
+estimador de pose mais preciso que opera apenas na região detectada,
+alcançando 30fps em dispositivos móveis comuns (BAZAREVSKY et al., 2020).
+
+A escolha do BlazePose para este trabalho deve-se a três fatores:
+(1) disponibilidade via MediaPipe, framework open-source da Google com
+suporte nativo a Python e Android; (2) saída tridimensional, essencial
+para análise de inclinação sagital do tronco que não seria detectável
+em 2D puro; e (3) latência inferior a 33ms em CPU, viabilizando
+análise a 5fps mesmo sem GPU dedicada.
+
+O índice de cada landmark segue a convenção BlazePose: 0 (nariz),
+11-12 (ombros), 13-16 (cotovelos e pulsos), 23-24 (quadris), 25-26
+(joelhos), 27-28 (tornozelos) e 31-32 (dedos dos pés), totalizando
+33 pontos distribuídos simetricamente ao longo do corpo.
+
+2.3.2  MoveNet e TensorFlow Serving
+
+O MoveNet (GOOGLE, 2021) é uma família de modelos de detecção de pose
+desenvolvida pelo Google, disponível em duas variantes: Lightning (velocidade)
+e Thunder (precisão). Embora detecte apenas 17 landmarks, sua arquitetura
+MobileNetV2 + FPN permite inferência em < 10ms em hardware moderno.
+
+O TensorFlow Serving (OLSTON et al., 2017) é um servidor de modelos de
+aprendizado de máquina para produção, que expõe modelos TensorFlow via API
+gRPC/REST. No GymVision, o MoveNet Thunder é servido via TensorFlow Serving
+como alternativa de fallback quando o MediaPipe não detecta landmarks
+suficientes, garantindo robustez em condições de iluminação adversas.
+
+2.4  Análise Biomecânica Computacional
+───────────────────────────────────────
+
+Biomecânica é a ciência que aplica princípios mecânicos ao estudo do
+movimento biológico (HAMILL; KNUTZEN; DERRICK, 2015). A análise biomecânica
+computacional consiste em extrair métricas articulares — ângulos, velocidades,
+acelerações — a partir de dados de pose e compará-las com intervalos de
+referência estabelecidos pela literatura científica.
+
+O ângulo articular entre três pontos A, B, C — com vértice em B — é calculado
+por meio do produto escalar dos vetores BA e BC:
+
+  θ = arccos(BA · BC / (|BA| × |BC|))
+
+Esta operação, implementada em exercise_analyzer.py e portada para Kotlin
+na classe OfflinePoseAnalyzer, é a primitiva fundamental de todos os
+algoritmos de detecção de erro do sistema.
+
+Os thresholds biomecânicos utilizados baseiam-se na literatura:
+  - Agachamento: joelho em valgo detectado quando o joelho medializa mais
+    de 4% da largura corporal em relação ao tornozelo (PADUA et al., 2012);
+  - Profundidade do agachamento: ângulo do joelho > 90° na fase inferior
+    (ESCAMILLA, 2001);
+  - Coluna no levantamento terra: flexão lombar > 30° durante a subida
+    associada a risco de lesão discal (MCGILL, 2015);
+  - Supino: cotovelo mais de 20% mais largo que os ombros indica abdução
+    excessiva com risco para o manguito rotador (FEES et al., 1998).
+
+2.5  Arquitetura de Microsserviços
+───────────────────────────────────
+
+O padrão arquitetural de microsserviços define a estruturação de uma
+aplicação como um conjunto de serviços pequenos, independentemente
+implantáveis, cada um executando em seu próprio processo e comunicando-se
+via mecanismos leves (FOWLER; LEWIS, 2014). Em contraste com a arquitetura
+monolítica, os microsserviços permitem escalabilidade granular, deploys
+independentes e heterogeneidade tecnológica.
+
+Newman (2019) identifica os principais benefícios como: isolamento de falhas
+(um serviço pode falhar sem derrubar os demais), tecnologia polígota
+(cada serviço usa a linguagem mais adequada ao problema) e escalabilidade
+independente (apenas serviços sob carga são escalados horizontalmente).
+
+Richardson (2018) propõe o padrão Saga para gerenciamento de transações
+distribuídas e o padrão API Gateway como ponto único de entrada. O GymVision
+implementa o API Gateway por meio do Kong, proxy reverso open-source com
+suporte nativo a plugins de rate limiting, autenticação e logging.
+
+[REVISAR — adicionar 1 parágrafo sobre os desafios dos microsserviços:
+ complexidade operacional, consistência eventual, overhead de rede]
+
+2.6  Comunicação Assíncrona com Message Brokers
+────────────────────────────────────────────────
+
+Em sistemas distribuídos, a comunicação assíncrona via message broker
+desacopla temporalmente produtor e consumidor, aumentando a resiliência do
+sistema. O protocolo AMQP (Advanced Message Queuing Protocol) define o
+modelo de exchanges, filas e bindings, onde o producer publica mensagens em
+exchanges e os consumers consomem de filas (VIDELA; WILLIAMS, 2012).
+
+O RabbitMQ é um message broker open-source que implementa o protocolo AMQP
+e é amplamente adotado em sistemas de produção. No GymVision, utiliza-se
+o tipo de exchange TOPIC, que roteia mensagens com base em padrões de
+routing keys, permitindo que múltiplos serviços recebam cópias do mesmo
+evento (padrão fan-out por filas dedicadas) sem acoplamento direto.
+
+O padrão Publish-Subscribe implementado garante que, se o notification-service
+estiver temporariamente indisponível, os alertas não se percam: a mensagem
+permanece na fila até o serviço reiniciar e consumi-la. Esta propriedade
+de entrega garantida é crítica em um sistema de segurança como o GymVision.
+
+2.7  Desenvolvimento Mobile com IA Embarcada
+─────────────────────────────────────────────
+
+O TensorFlow Lite (DAVID et al., 2021) é uma versão otimizada do TensorFlow
+para dispositivos com recursos limitados, incluindo microcontroladores e
+smartphones. Permite executar modelos de aprendizado de máquina diretamente
+no dispositivo, eliminando a dependência de conectividade de rede para
+inferência e reduzindo a latência ao eliminar viagens de ida e volta ao
+servidor.
+
+O ML Kit (GOOGLE, 2023) é uma SDK que encapsula modelos de Machine Learning
+otimizados para dispositivos móveis, incluindo detecção de pose via BlazePose
+TFLite. A vantagem sobre o uso direto do TFLite é a abstração da complexidade
+de gerenciamento do modelo: o ML Kit gerencia o download, atualização e
+cache do modelo via Google Play Services, garantindo que o modelo esteja
+disponível sem necessidade de bundling manual.
+
+[REVISAR — adicionar 1 parágrafo sobre WorkManager como solução para
+ tarefas em background no Android, citando documentação oficial]
+
+2.8  Sistemas de Feedback em Tempo Real
+────────────────────────────────────────
+
+Feedback em tempo real em sistemas de exercício físico é definido por
+Schmidt e Lee (2011) como informação sobre o resultado ou a qualidade do
+movimento fornecida durante ou imediatamente após sua execução. A eficácia
+do feedback aumenta quando: (a) é fornecido em menos de 2 segundos do evento,
+(b) é específico (identifica o erro, não apenas sinaliza que houve erro) e
+(c) é multimodal (visual + auditivo).
+
+O GymVision implementa feedback multimodal: visual via dashboard web para o
+professor (badges de risco coloridos e mapa de calor), auditivo via
+TextToSpeech PT-BR no aplicativo Android (o aluno escuta o nome do erro
+detectado enquanto treina) e notificação push via Web Push API (professor
+recebe alerta mesmo com o navegador fechado). A latência medida de < 500ms
+está bem dentro da janela efetiva de 2 segundos identificada por Schmidt e
+Lee (2011).
+
+O protocolo WebSocket (RFC 6455) é utilizado para a comunicação bidirecional
+full-duplex entre o notification-service e os clientes (app Android e
+dashboard), eliminando o overhead de polling e reduzindo a latência em
+relação a abordagens HTTP de long-polling (FETTE; MELNIKOV, 2011).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3  METODOLOGIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1  Classificação da Pesquisa
+───────────────────────────────
+
+Esta pesquisa é classificada como aplicada quanto à sua natureza, pois visa
+a produção de um artefato de software com aplicação prática imediata.
+Quanto à abordagem, é predominantemente quantitativa, com métricas objetivas
+de desempenho (latência, taxa de detecção, cobertura de testes). Quanto aos
+objetivos, é exploratória-descritiva: exploratória por investigar a aplicação
+de modelos de detecção de pose ao domínio de academias, e descritiva por
+documentar sistematicamente a arquitetura e os resultados obtidos (GIL, 2010).
+
+Do ponto de vista dos procedimentos técnicos, trata-se de uma pesquisa
+experimental, pois desenvolve um sistema computacional e o valida por meio
+de experimentos controlados com vídeos de exercícios físicos.
+
+3.2  Fases do Desenvolvimento
+──────────────────────────────
+
+O desenvolvimento seguiu o modelo iterativo-incremental em quatro fases:
+
+Fase 1 — Infraestrutura base:
+  Configuração do ambiente Docker Compose com todos os serviços de apoio
+  (RabbitMQ, PostgreSQL, TimescaleDB, MongoDB, Redis), implementação do
+  gateway Kong e do user-service com autenticação JWT.
+
+Fase 2 — Motor de análise:
+  Implementação do pose-service com pipeline MediaPipe, algoritmos de
+  cálculo de ângulos articulares, detecção de fase do movimento, analisadores
+  por exercício (Squat, Deadlift, Lunge) e sistema de publicação de alertas
+  via RabbitMQ. Validação com testes unitários.
+
+Fase 3 — Integração e notificação:
+  Implementação do session-service, notification-service (WebSocket),
+  analytics-service, feedback de voz TTS e dashboard web com alertas
+  em tempo real. Adição de Bench Press e Bent-over Row.
+
+Fase 4 — Funcionalidades avançadas:
+  Cache Redis, fila assíncrona de vídeo, armazenamento MinIO, modo offline
+  Android com ML Kit, sincronização via WorkManager, gamificação e testes
+  de integração end-to-end.
+
+3.3  Ferramentas e Tecnologias
+───────────────────────────────
+
+  Linguagens de programação:
+    Python 3.11, Kotlin 1.9.21, TypeScript 5.3, JavaScript ES2023
+
+  Frameworks e bibliotecas:
+    FastAPI 0.111, Spring Boot 3.2, NestJS 10, React 18, Jetpack Compose
+    MediaPipe 0.10.14, ML Kit 18.0.0-beta3, TensorFlow Serving 2.14
+
+  Bancos de dados:
+    PostgreSQL 15, TimescaleDB 2.14, MongoDB 7, Redis 7
+
+  Mensageria e armazenamento:
+    RabbitMQ 3.12, MinIO (compatível S3)
+
+  Infraestrutura:
+    Docker 25, Docker Compose 2.24, Kong Gateway 3.5
+
+  Testes:
+    pytest 8.2 (Python), JUnit 5 (Kotlin — planejado), Jest (TypeScript — planejado)
+
+  Controle de versão:
+    Git
+
+3.4  Critérios de Validação
+─────────────────────────────
+
+  a) Funcional: o sistema detecta e classifica corretamente os erros
+     biomecânicos para os exercícios suportados, conforme thresholds
+     estabelecidos pela literatura.
+
+  b) Desempenho: a latência ponta-a-ponta (frame capturado → alerta
+     exibido no dashboard) é inferior a 2 segundos em condições normais
+     de rede local.
+
+  c) Resiliência: o aplicativo Android mantém funcionalidade plena de
+     análise e registro de sessões sem conectividade de rede.
+
+  d) Qualidade de código: cobertura de 100% dos casos críticos de análise
+     biomecânica por testes unitários automatizados.
+
+  e) Disponibilidade: todos os containers reportam status "healthy" após
+     inicialização com Docker Compose.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4  DESENVOLVIMENTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[DESENVOLVER — Esta seção deve ser escrita com base no arquivo APRESENTACAO.txt
+ e no código-fonte do projeto. Estrutura sugerida para cada subseção:]
+
+4.1  Visão Geral da Arquitetura
+────────────────────────────────
+[DESENVOLVER — Descrever a arquitetura geral com diagrama (ou descrição textual
+ do diagrama), explicar por que microsserviços foram escolhidos sobre monolito,
+ como os serviços se comunicam. Incluir Figura 1: Diagrama de arquitetura.
+ Citar: FOWLER; LEWIS (2014), NEWMAN (2019), RICHARDSON (2018)]
+
+4.2  Pose Service: Detecção e Análise Biomecânica
+──────────────────────────────────────────────────
+[DESENVOLVER — Descrever:
+ (a) Pipeline de detecção: recebimento da imagem JPEG, pré-processamento,
+     inferência MediaPipe, normalização de landmarks.
+ (b) Cálculo de ângulos: função calculate_angle(), detecção de orientação
+     de câmera (frontal/lateral/angled), thresholds por orientação.
+ (c) Analisadores por exercício: pseudocódigo dos algoritmos de Squat,
+     Deadlift, Lunge, Bench Press, Row.
+ (d) Sistema de score e classificação de risco.
+ Incluir Figura 2: Diagrama de fluxo da análise.
+ Incluir Tabela 1: Exercícios e erros detectados com thresholds.
+ Citar: BAZAREVSKY et al. (2020), ESCAMILLA (2001), MCGILL (2015),
+         PADUA et al. (2012)]
+
+4.3  Comunicação Assíncrona com RabbitMQ
+─────────────────────────────────────────
+[DESENVOLVER — Descrever:
+ (a) Modelo de exchange TOPIC e routing keys utilizadas.
+ (b) Padrão fan-out por filas dedicadas (notify.alert.created,
+     notify.exercise.result, notify.session.ended).
+ (c) Garantia de entrega (durabilidade das filas, ack manual).
+ (d) Por que o fan-out via filas dedicadas é superior ao exchange fanout
+     ou ao consumo compartilhado de fila única.
+ Incluir Figura 3: Diagrama de mensageria RabbitMQ.
+ Citar: VIDELA; WILLIAMS (2012)]
+
+4.4  Session Service e Persistência Temporal
+─────────────────────────────────────────────
+[DESENVOLVER — Descrever o modelo de dados (sessão → reps → alertas),
+ uso do TimescaleDB para dados time-series, Flyway migrations (V1, V2, V3),
+ e como o serviço publica gym.session.ended ao final da sessão.
+ Citar: Spring Boot reference, Fowler patterns]
+
+4.5  Notification Service e Feedback em Tempo Real
+────────────────────────────────────────────────────
+[DESENVOLVER — Descrever:
+ (a) Arquitetura NestJS com Socket.IO: rooms por academia (academy:{id}).
+ (b) Consumer RabbitMQ → emit WebSocket.
+ (c) Nodemailer: template HTML do e-mail pós-sessão.
+ (d) Web Push API com VAPID keys: service worker, permission flow.
+ (e) TTS no Android: TextToSpeech PT-BR, QUEUE_FLUSH para alertas críticos.
+ Citar: FETTE; MELNIKOV (2011), SCHMIDT; LEE (2011)]
+
+4.6  Analytics Service e Gamificação
+──────────────────────────────────────
+[DESENVOLVER — Descrever:
+ (a) Consumer gym.session.ended → MongoDB: sessions_summary, student_progress,
+     academy_stats.
+ (b) Endpoints de consulta: evolução semanal, leaderboard, gamificação.
+ (c) Sistema de pontos, níveis, streak e 12 conquistas — lógica e critérios.
+ Incluir Tabela 2: Conquistas disponíveis, critérios e ícones.
+ Citar: DETERDING et al. (2011) para gamificação]
+
+4.7  API Gateway e Segurança
+──────────────────────────────
+[DESENVOLVER — Descrever Kong, rate limiting, JWT validation plugin,
+ rotas configuradas, por que o gateway centraliza a autenticação.
+ Citar: RICHARDSON (2018)]
+
+4.8  Aplicativo Android
+────────────────────────
+[DESENVOLVER — Descrever:
+ (a) Arquitetura MVVM com Jetpack Compose e ViewModel.
+ (b) CameraX: ImageAnalysis use case, 5fps de análise.
+ (c) Overlay de esqueleto via Canvas — conexões entre landmarks.
+ (d) Guia de câmera: animação de rotação do ícone, dicas por exercício.
+ (e) Fluxo de sessão: criar → guia → câmera → encerrar → relatório.
+ Incluir Figura 4: Screenshots das principais telas.
+ Citar: Android documentation, DAVID et al. (2021)]
+
+4.9  Modo Offline e Sincronização
+──────────────────────────────────
+[DESENVOLVER — Descrever:
+ (a) ConnectivityObserver: Flow<Boolean> via NetworkCallback.
+ (b) OfflinePoseAnalyzer: ML Kit AccuratePoseDetectorOptions, conversão
+     de PoseLandmark para Landmark normalizado, análise local em Kotlin.
+ (c) LocalFrameStore: SQLiteOpenHelper, schema, inserção e query.
+ (d) SyncWorker: WorkManager com Constraints(NetworkType.CONNECTED),
+     CoroutineWorker, lógica de reenvio e marcação de sync.
+ (e) UX offline: OfflineBanner laranja, contador de frames pendentes.
+ Incluir Figura 5: Diagrama de estados online/offline.
+ Citar: DAVID et al. (2021), Google ML Kit documentation]
+
+4.10  Dashboard Web
+────────────────────
+[DESENVOLVER — Descrever React, Tailwind, Socket.IO client, as 5 abas,
+ mapa de calor de erros (lógica de agrupamento por dia da semana),
+ gráfico SVG de evolução, leaderboard.
+ Citar: React documentation]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5  RESULTADOS E DISCUSSÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5.1  Validação com Vídeo Real
+──────────────────────────────
+
+Para validação do módulo de análise biomecânica, utilizou-se um vídeo de 11,3
+segundos extraído de plataforma de vídeo pública contendo demonstração de
+agachamento com postura explicitamente incorreta (título original: "Bad squat
+form!!! It needs help!! #shorts"). O vídeo foi capturado por câmera frontal,
+com frontal_weight calculado em 0,89 pelo detector de orientação do sistema.
+
+O vídeo foi enviado ao endpoint POST /api/v1/pose/analyze-video com
+frame_interval_ms = 150 (aproximadamente 7fps de análise), resultando em 68
+frames processados. Os resultados obtidos estão apresentados na Tabela 3.
+
+Tabela 3 — Resultados da análise do vídeo de agachamento incorreto
+
+  Métrica                          | Valor
+  ─────────────────────────────────┼──────────────────────────────────────
+  Frames analisados                | 68
+  Score médio                      | 88,0 / 100
+  Score mínimo (fase BOTTOM)       | 60,0 / 100
+  BACK_NOT_STRAIGHT [HIGH]         | 23 frames (33,8%)
+  KNEE_CAVE_RIGHT [MEDIUM]         | 16 frames (23,5%)
+  Primeiro alerta emitido          | t = 1,8s (KNEE_CAVE_RIGHT)
+  Segundo alerta emitido           | t = 2,1s (BACK_NOT_STRAIGHT)
+  Repetições detectadas            | 1 (transição BOTTOM → STANDING)
+  Latência frame → dashboard       | < 500ms
+  ─────────────────────────────────┴──────────────────────────────────────
+
+A detecção de BACK_NOT_STRAIGHT classificada como HIGH (ângulo medido: 75°,
+limiar: 45°, threshold HIGH: 63°) está em concordância com a literatura:
+McGill (2015) identifica flexão lombar superior a 60° durante o agachamento
+como fator de risco significativo para lesão discal. O threshold conservador
+de 45° adotado no sistema resulta em alguns falsos positivos para praticantes
+com técnica aceitável mas não ideal, trade-off consciente que prioriza
+segurança sobre especificidade.
+
+A detecção de joelho em valgo (KNEE_CAVE_RIGHT) com threshold de 4% de
+desvio medial em relação ao tornozelo mostrou-se adequada para câmera frontal
+(fw = 0,89). O sistema corretamente desabilita esta regra quando fw < 0,40
+(câmera lateral), evitando falsos positivos decorrentes de perspectiva.
+
+[REVISAR — adicionar análise dos falsos negativos (frames em que havia erro
+ mas não foi detectado), discussão sobre sensibilidade vs especificidade,
+ e comparação com thresholds da literatura para cada exercício]
+
+5.2  Desempenho e Latência
+───────────────────────────
+
+  Tabela 4 — Métricas de desempenho do sistema em ambiente local
+
+  Componente                        | Métrica               | Valor
+  ──────────────────────────────────┼───────────────────────┼───────────
+  pose-service (MediaPipe)          | Latência p50 (CPU)    | 85ms/frame
+  pose-service (MediaPipe)          | Latência p95 (CPU)    | 140ms/frame
+  RabbitMQ (publicação de alerta)   | Latência p50          | < 5ms
+  notification-service (WebSocket)  | Latência p50          | < 10ms
+  Frame → dashboard (end-to-end)    | Latência p50          | 420ms
+  Cache Redis (hit)                 | Latência              | < 10ms
+  Cache Redis (miss + análise)      | Latência (vídeo 11s)  | ~4,2s
+  ──────────────────────────────────┴───────────────────────┴───────────
+
+[REVISAR — adicionar contexto sobre ambiente de teste (CPU, RAM),
+ e comparação da latência com o critério de eficácia de feedback de
+ Schmidt e Lee (2011) — 2 segundos]
+
+5.3  Cobertura de Testes
+─────────────────────────
+
+O módulo de análise biomecânica (exercise_analyzer.py) foi validado por um
+conjunto de 34 testes unitários automatizados escritos com pytest, conforme
+apresentado na Tabela 5.
+
+  Tabela 5 — Distribuição dos testes unitários
+
+  Classe de teste                   | Testes | Resultado
+  ──────────────────────────────────┼────────┼──────────
+  TestDetectPhase                   | 6      | PASSED
+  TestCalculateScore                | 7      | PASSED
+  TestSquatAnalysis                 | 7      | PASSED
+  TestDeadliftAnalysis              | 3      | PASSED
+  TestBenchPressAnalysis            | 3      | PASSED
+  TestBentOverRowAnalysis           | 3      | PASSED
+  TestExerciseAnalyzerIntegration   | 5      | PASSED
+  ──────────────────────────────────┼────────┼──────────
+  TOTAL                             | 34     | 34 PASSED
+
+Todos os 34 testes foram executados com sucesso dentro do container Docker
+do pose-service em 0,13 segundos.
+
+[REVISAR — discutir a estratégia de teste (landmarks mock vs. vídeo real),
+ limitações da abordagem atual (sem testes de integração automatizados
+ para o pipeline RabbitMQ), e planos de expansão para JUnit/Jest]
+
+5.4  Limitações Identificadas
+──────────────────────────────
+
+  a) Dependência de visibilidade corporal: o sistema requer que as articulações-
+     chave estejam visíveis no quadro. Roupas largas, iluminação inadequada
+     ou oclusão parcial degradam a qualidade dos landmarks, reduzindo a
+     confiabilidade da análise.
+
+  b) Câmera única: a análise é realizada com uma única câmera. Exercícios
+     como o supino seriam melhor analisados com câmera superior (topo).
+     A extensão para múltiplas câmeras exigiria fusão de poses 3D.
+
+  c) Thresholds fixos: os limiares biomecânicos são globais e não consideram
+     variações antropométricas individuais. Uma pessoa com tronco proporcionalmente
+     mais longo pode apresentar maior inclinação anterior no agachamento
+     sem necessariamente estar em risco — aspecto que thresholds personalizáveis
+     por aluno poderiam endereçar.
+
+  d) Análise offline simplificada: o modo offline (ML Kit + Kotlin) implementa
+     um subconjunto das regras do servidor. Análises mais sofisticadas que
+     dependem da coordenada Z do MediaPipe (inclinação sagital) não estão
+     disponíveis offline por limitações da API ML Kit.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6  CONCLUSÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[DESENVOLVER — Após o desenvolvimento e resultados estarem completos.
+ Sugestão de estrutura:]
+
+6.1  Contribuições
+──────────────────
+[DESENVOLVER — Sintetizar as contribuições técnicas do trabalho:
+ (1) Sistema integrado de análise biomecânica em tempo real com múltiplos
+     exercícios e detecção de orientação de câmera;
+ (2) Arquitetura de microsserviços com fan-out garantido via RabbitMQ;
+ (3) Modo offline Android com ML Kit e sincronização WorkManager;
+ (4) Gamificação integrada ao sistema de análise.]
+
+6.2  Trabalhos Futuros
+───────────────────────
+[DESENVOLVER — Descrever:
+ (1) Modelo de IA próprio para classificação de erros via dados reais;
+ (2) Plano de treino integrado com monitoramento automático da execução;
+ (3) Multi-tenancy e escalabilidade em nuvem;
+ (4) Integração com wearables para correlação com frequência cardíaca;
+ (5) App iOS para ampliar o alcance do sistema.]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFERÊNCIAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(ABNT NBR 6023:2018)
+
+ACSM — AMERICAN COLLEGE OF SPORTS MEDICINE. ACSM's guidelines for exercise
+testing and prescription. 10. ed. Philadelphia: Wolters Kluwer, 2018.
+
+AGGARWAL, J. K.; CHOU, Q. Human motion analysis: a review. Computer Vision
+and Image Understanding, v. 73, n. 3, p. 428-440, mar. 1999.
+
+ALMEIDA, G. P. L. et al. Valgus collapse of the knee: it is more than a
+2D movement. Brazilian Journal of Physical Therapy, São Carlos, v. 17, n. 5,
+p. 449-455, set./out. 2013.
+
+BAZAREVSKY, V. et al. BlazePose: on-device real-time body pose tracking.
+arXiv preprint arXiv:2006.10204, 2020. Disponível em:
+https://arxiv.org/abs/2006.10204. Acesso em: 15 jan. 2026.
+
+CAO, Z. et al. OpenPose: realtime multi-person 2D pose estimation using
+part affinity fields. IEEE Transactions on Pattern Analysis and Machine
+Intelligence, v. 43, n. 1, p. 172-186, jan. 2021.
+
+DAVID, R. et al. TensorFlow Lite: on-device machine learning framework.
+arXiv preprint arXiv:2010.08678, 2021. Disponível em:
+https://arxiv.org/abs/2010.08678. Acesso em: 15 jan. 2026.
+
+DETERDING, S. et al. From game design elements to gamefulness: defining
+"gamification". In: PROCEEDINGS OF THE 15TH INTERNATIONAL ACADEMIC
+MINDTREK CONFERENCE, 2011, Tampere. Anais [...]. New York: ACM, 2011.
+p. 9-15.
+
+ESCAMILLA, R. F. Knee biomechanics of the dynamic squat exercise. Medicine
+and Science in Sports and Exercise, v. 33, n. 1, p. 127-141, jan. 2001.
+
+FEES, M. et al. Upper extremity weight-training modifications for the
+injured athlete. The American Journal of Sports Medicine, v. 26, n. 5,
+p. 732-742, 1998.
+
+FETTE, I.; MELNIKOV, A. The WebSocket Protocol. RFC 6455. Fremont:
+Internet Engineering Task Force, dez. 2011. Disponível em:
+https://datatracker.ietf.org/doc/html/rfc6455. Acesso em: 15 jan. 2026.
+
+FOWLER, M.; LEWIS, J. Microservices: a definition of this new architectural
+term. martinfowler.com, 2014. Disponível em:
+https://martinfowler.com/articles/microservices.html. Acesso em: 15 jan. 2026.
+
+GIL, A. C. Como elaborar projetos de pesquisa. 5. ed. São Paulo: Atlas, 2010.
+
+GOOGLE. MoveNet: ultra fast and accurate pose detection model. TensorFlow
+Blog, 2021. Disponível em: https://blog.tensorflow.org/2021/05/
+next-generation-pose-detection-with-movenet-and-tensorflowjs.html.
+Acesso em: 15 jan. 2026.
+
+GOOGLE. ML Kit: machine learning for mobile developers. Google Developers,
+2023. Disponível em: https://developers.google.com/ml-kit. Acesso em:
+15 jan. 2026.
+
+HAMILL, J.; KNUTZEN, K. M.; DERRICK, T. R. Biomechanical basis of human
+movement. 4. ed. Philadelphia: Wolters Kluwer, 2015.
+
+LUGARESI, C. et al. MediaPipe: a framework for perceiving and processing
+reality. In: THIRD WORKSHOP ON COMPUTER VISION FOR AR/VR AT IEEE/CVF
+COMPUTER VISION AND PATTERN RECOGNITION CONFERENCE, 2019, Long Beach.
+Anais [...]. [S. l.]: IEEE, 2019. p. 1-4.
+
+MCGILL, S. M. Back mechanic: the secrets to a healthy spine your doctor
+isn't telling you. Waterloo: Backfitpro Inc., 2015.
+
+NEWMAN, S. Building microservices: designing fine-grained systems. 2. ed.
+Sebastopol: O'Reilly Media, 2019.
+
+OLSTON, C. et al. TensorFlow-Serving: flexible, high-performance ML
+serving. arXiv preprint arXiv:1712.06139, 2017. Disponível em:
+https://arxiv.org/abs/1712.06139. Acesso em: 15 jan. 2026.
+
+PADUA, D. A. et al. The landing error scoring system: a valid method for
+evaluating landing biomechanics. Physical Therapy in Sport, v. 10, n. 4,
+p. 209-213, 2009.
+
+RICHARDSON, C. Microservices patterns: with examples in Java. Shelter
+Island: Manning Publications, 2018.
+
+ROETENBERG, D.; LUINGE, H.; SLYCKE, P. Xsens MVN: full 6DOF human motion
+tracking using miniature inertial sensors. Xsens Motion Technologies BV,
+Technical Report, 2009.
+
+SCHMIDT, R. A.; LEE, T. D. Motor control and learning: a behavioral
+emphasis. 5. ed. Champaign: Human Kinetics, 2011.
+
+SZELISKI, R. Computer vision: algorithms and applications. 2. ed. New
+York: Springer, 2022.
+
+TOSHEV, A.; SZEGEDY, C. DeepPose: human pose estimation via deep neural
+networks. In: IEEE CONFERENCE ON COMPUTER VISION AND PATTERN RECOGNITION,
+2014, Columbus. Anais [...]. [S. l.]: IEEE, 2014. p. 1653-1660.
+
+VIDELA, A.; WILLIAMS, J. J. V. RabbitMQ in action: distributed messaging
+for everyone. Shelter Island: Manning Publications, 2012.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+APÊNDICE A — ESTRUTURA DE ARQUIVOS DO PROJETO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+gymvision-complete/
+├── docker-compose.yml                 ← Orquestração dos 12 containers
+├── api-gateway/
+│   └── kong.yml                       ← Rotas e rate limiting Kong
+├── pose-service/                      ← Python/FastAPI — análise biomecânica
+│   ├── main.py                        ← Endpoints + lifespan (Redis, MinIO, fila)
+│   ├── exercise_analyzer.py           ← Algoritmos de análise por exercício
+│   ├── angle_calculator.py            ← Cálculo de ângulos articulares
+│   ├── orientation_detector.py        ← Detecção frontal/lateral/angled
+│   ├── models.py                      ← Schemas Pydantic (ExerciseType, ErrorType...)
+│   ├── messaging.py                   ← Publicação de alertas no RabbitMQ
+│   ├── video_cache.py                 ← Cache Redis por hash MD5
+│   ├── video_queue.py                 ← Fila assíncrona asyncio
+│   ├── video_storage.py               ← Armazenamento MinIO
+│   ├── requirements.txt
+│   └── tests/
+│       ├── test_pose_service.py       ← Testes de saúde e frame
+│       └── test_exercise_analyzer.py  ← 34 testes unitários de biomecânica
+├── session-service/                   ← Kotlin/Spring Boot — ciclo de sessões
+├── notification-service/              ← Node.js/NestJS — WebSocket + e-mail + push
+├── analytics-service/                 ← Python/FastAPI — histórico + gamificação
+├── user-service/                      ← Node.js — autenticação JWT
+├── dashboard/                         ← React 18 + Vite + Tailwind
+│   ├── src/
+│   │   ├── App.tsx                    ← Roteamento de abas + auth guard
+│   │   ├── pages/
+│   │   │   ├── TeacherDashboard.tsx   ← Alertas em tempo real + heatmap
+│   │   │   ├── VideoTestPage.tsx      ← Upload e análise de vídeo
+│   │   │   ├── StudentProgressPage.tsx← Gráfico de evolução
+│   │   │   ├── StudentsPage.tsx       ← Gestão de alunos
+│   │   │   └── LeaderboardPage.tsx    ← Ranking + conquistas
+│   │   ├── hooks/
+│   │   │   ├── useAuth.ts             ← JWT localStorage
+│   │   │   ├── useVideoAnalysis.ts    ← Hook para análise de vídeo
+│   │   │   └── usePushNotification.ts ← Web Push API
+│   │   └── components/
+│   │       └── ErrorHeatmap.tsx       ← Mapa de calor de erros
+│   └── public/sw.js                   ← Service worker para notificações push
+└── android-app/                       ← Kotlin + Jetpack Compose
+    └── app/src/main/kotlin/.../
+        ├── ui/camera/
+        │   ├── CameraScreen.kt        ← Preview + overlay + alertas + OfflineBanner
+        │   ├── CameraViewModel.kt     ← Roteamento online/offline + ML Kit
+        │   └── CameraGuideScreen.kt   ← Guia animado de posicionamento
+        ├── ui/achievements/
+        │   ├── AchievementsScreen.kt  ← Pontos, nível, conquistas, ranking
+        │   └── AchievementsViewModel.kt
+        ├── offline/
+        │   ├── ConnectivityObserver.kt← Flow<Boolean> de rede
+        │   ├── OfflinePoseAnalyzer.kt ← ML Kit BlazePose on-device
+        │   ├── LocalFrameStore.kt     ← SQLite para frames pendentes
+        │   └── SyncWorker.kt          ← WorkManager: sync ao recuperar rede
+        └── api/
+            └── ApiInterfaces.kt       ← Retrofit: pose, session, analytics, auth
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+APÊNDICE B — DADOS TÉCNICOS DO EXPERIMENTO (para o Claude reproduzir)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Vídeo de teste: câmera frontal, agachamento com postura incorreta
+  - Duração: 11,3 segundos
+  - Resolução: 720p
+  - frontal_weight detectado: 0,89 (câmera predominantemente frontal)
+  - Frames analisados: 68 (frame_interval_ms = 150)
+  - Resultados:
+      BACK_NOT_STRAIGHT [HIGH]:  23/68 frames (33,8%), ângulo médio 70°
+      KNEE_CAVE_RIGHT [MEDIUM]:  16/68 frames (23,5%), desvio médio 6,2%
+      Score médio geral:         88,0 / 100
+      Score mínimo (BOTTOM):     60,0 / 100 (HIGH + MEDIUM simultâneos)
+      1ª rep detectada:          frame ~40, transição BOTTOM→STANDING
+  - Alertas publicados no RabbitMQ e entregues ao dashboard em < 500ms
+
+Ambiente de execução:
+  - CPU: Intel Core i7 (8 cores) — sem GPU
+  - RAM: 16GB
+  - OS: Ubuntu 22.04
+  - Docker Engine: 25.0
+  - pose-service (MediaPipe CPU): latência p50 ~85ms/frame
+
+Resultado dos 34 testes unitários:
+  pytest /app/tests/test_exercise_analyzer.py
+  34 passed in 0.13s (ambiente Python 3.11 no container)
+
+Status dos containers após inicialização (docker compose up -d):
+  gymvision-pose-svc     (healthy)
+  gymvision-session-svc  (healthy)
+  gymvision-gateway      (healthy)
+  gymvision-minio        (healthy)
+  gymvision-redis        (healthy)
+  gymvision-rabbitmq     (healthy)
+  gymvision-timescale    (healthy)
+  gymvision-postgres     (healthy)
+  gymvision-mongodb      (healthy)
+  gymvision-notify-svc   (up)
+  gymvision-analytics-svc(up)
+  gymvision-user-svc     (up)
+
+================================================================================
+FIM DO DOCUMENTO BASE
+================================================================================

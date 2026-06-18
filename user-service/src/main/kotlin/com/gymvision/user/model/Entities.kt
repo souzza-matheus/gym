@@ -22,6 +22,9 @@ data class Academy(
 
     val active: Boolean = true,
 
+    @Column(name = "invite_code", unique = true, length = 12)
+    val inviteCode: String? = null,
+
     @Column(name = "created_at", updatable = false)
     val createdAt: Instant = Instant.now(),
 

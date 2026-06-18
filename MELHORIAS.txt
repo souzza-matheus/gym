@@ -1,0 +1,399 @@
+================================================================================
+GYMVISION — PLANO DE MELHORIAS (ordenado do mais rápido ao mais longo)
+================================================================================
+
+STATUS: [ ] = pendente | [x] = concluído | [~] = em progresso | [!] = bloqueado
+
+────────────────────────────────────────────────────────────────────────────────
+INSTRUÇÕES PARA O PRÓXIMO CLAUDE (leia isso primeiro se o contexto zerou)
+────────────────────────────────────────────────────────────────────────────────
+
+Projeto: /home/souzza-matheus/Downloads/gymvision-complete
+Stack: pose-service (Python/FastAPI), session-service (Kotlin/Spring),
+       notification-service (Node/NestJS), dashboard (React/Vite porta 5173),
+       android-app (Kotlin/Jetpack Compose), gateway Kong (porta 8090),
+       RabbitMQ, TimescaleDB, PostgreSQL, MongoDB, Redis — tudo em Docker Compose.
+
+Regra geral: após cada item concluído, marque [x] neste arquivo e salve.
+Após cada item, execute docker compose build + up --force-recreate no serviço
+modificado se aplicável.
+
+Para continuar de onde parou:
+1. Leia este arquivo inteiro para ver o que está [x] e o que está [ ]
+2. Pegue o primeiro item [ ] da lista
+3. Leia os arquivos relevantes antes de editar
+4. Marque [~] no item enquanto trabalha, [x] quando terminar
+5. Atualize a seção "ÚLTIMO PONTO DE PARADA" no final deste arquivo
+
+CREDENCIAIS DE TESTE:
+  Professor: professor@gymvision.com / senha123
+  Aluno:     joao@gymvision.com / senha123
+  Admin:     admin@gymvision.com / senha123
+  Dashboard: http://localhost:5173
+  Gateway:   http://localhost:8090
+
+COMANDOS ÚTEIS:
+  docker compose build <serviço> && docker compose up -d --force-recreate <serviço>
+  docker compose logs -f <serviço>
+  docker ps --format "table {{.Names}}\t{{.Status}}"
+
+================================================================================
+TIER 1 — MUITO RÁPIDO (< 30 min cada)
+================================================================================
+
+[x] 1. Corrigir healthcheck do pose-service  ← wget em vez de curl; pose-svc agora (healthy)
+    Problema: pose-svc aparece como "unhealthy" no Docker porque o healthcheck
+    aponta para endpoint errado ou tem timeout muito curto.
+    Arquivo: docker-compose.yml (seção pose-service > healthcheck)
+    Como verificar: docker ps | grep pose → deve mostrar "(healthy)"
+
+[x] 2. Logs estruturados no pose-service (JSON)
+    Hoje os logs são texto livre. Trocar para JSON estruturado com campos:
+    timestamp, service, level, message, session_id, student_id.
+    Arquivo: pose-service/main.py — trocar logging.basicConfig por formatter JSON
+    Benefício: facilita integração com Grafana/Loki em produção
+
+[x] 3. Rate limiting no Kong (gateway)
+    Limitar requisições ao pose-service para evitar abuso.
+    Arquivo: docker-compose.yml ou kong/kong.yml (plugin rate-limiting)
+    Meta: máx 60 req/min por IP para /api/v1/pose/*
+
+================================================================================
+TIER 2 — RÁPIDO (30 min – 2 horas cada)
+================================================================================
+
+[x] 4. Feedback de voz no app Android (TextToSpeech)
+    Quando alerta HIGH ou MEDIUM chega via WebSocket, falar em português:
+    "Joelho para dentro", "Endireite as costas", etc.
+    Arquivos:
+      android-app/.../ui/camera/CameraScreen.kt
+      android-app/.../ui/camera/CameraViewModel.kt
+    Mapeamento de errorType → texto PT-BR já existe em RiskMappers.kt,
+    reutilizar lá.
+
+[x] 5. Contagem de repetições em tempo real no app Android
+    O backend já retorna phase (BOTTOM/STANDING) e o rep counter existe.
+    Exibir um número grande na CameraScreen que incrementa a cada rep.
+    Arquivo: android-app/.../ui/camera/CameraScreen.kt
+    Dado: PoseAnalysisResponse já tem rep info via phase transitions
+
+[x] 6. Login no dashboard web
+    Hoje qualquer pessoa na rede acessa sem senha.
+    Adicionar tela de login que chama POST /api/v1/auth/login (user-service).
+    Armazenar JWT no localStorage e incluir em todas as chamadas à API.
+    Arquivos novos:
+      dashboard/src/pages/LoginPage.tsx
+      dashboard/src/hooks/useAuth.ts
+    Arquivo modificado:
+      dashboard/src/App.tsx (redirecionar para login se sem token)
+      dashboard/src/hooks/useVideoAnalysis.ts (header Authorization)
+
+================================================================================
+TIER 3 — MÉDIO (2 – 4 horas cada)
+================================================================================
+
+[x] 7. Mais exercícios: Supino (BENCH_PRESS)
+    Adicionar detecção de erros para supino deitado:
+      - Cotovelo muito aberto (> 90° do tronco)
+      - Pulso dobrado (wrist_angle)
+      - Arco lombar excessivo
+    Arquivos:
+      pose-service/exercise_analyzer.py (nova classe BenchPressAnalyzer)
+      pose-service/models.py (adicionar BENCH_PRESS no enum ExerciseType)
+      dashboard/src/pages/VideoTestPage.tsx (adicionar opção no select)
+      android-app/.../ui/sessions/SessionListScreen.kt (opção de exercício)
+
+[x] 8. Mais exercícios: Remada (BENT_OVER_ROW)
+    Detectar:
+      - Coluna arredondada (back_angle > 30° de curvatura)
+      - Cotovelo não chega até o tronco (amplitude insuficiente)
+    Arquivos: mesmos do item 7
+
+[x] 9. Relatório pós-treino automático (e-mail)
+    Quando gym.session.ended é publicado no RabbitMQ, enviar e-mail com:
+    score médio, reps, principais erros, comparativo com sessão anterior.
+    Arquivos:
+      notification-service/src/consumer/alert.consumer.ts  ← consumer notify.session.ended
+      notification-service/src/mailer/mailer.service.ts   ← novo, Nodemailer + HTML bonito
+      notification-service/src/app.module.ts               ← MailerService registrado
+      pose-service/messaging.py                            ← fila notify.session.ended adicionada
+    Config SMTP via: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM (env vars)
+
+[x] 10. Mapa de calor de erros no dashboard
+    Gráfico mostrando quais erros acontecem mais, por dia da semana e por aluno.
+    Dados já disponíveis via analytics-service.
+    Arquivo novo: dashboard/src/components/ErrorHeatmap.tsx
+    Arquivo modificado: dashboard/src/pages/TeacherDashboard.tsx
+
+[x] 11. Comparação entre sessões no dashboard
+    Gráfico de evolução do score semana a semana por aluno.
+    Arquivo novo: dashboard/src/pages/StudentProgressPage.tsx
+    Arquivo modificado: dashboard/src/App.tsx (nova aba)
+
+[x] 12. Push notification no navegador (Web Push)
+    Professor recebe notificação mesmo com a aba do dashboard fechada.
+    Requer: service worker + VAPID keys no notification-service.
+    Arquivos:
+      dashboard/public/sw.js (service worker)
+      dashboard/src/hooks/usePushNotification.ts
+      notification-service/src/gateway/alert.gateway.ts (enviar push além do WS)
+
+================================================================================
+TIER 4 — LONGO (4+ horas cada)
+================================================================================
+
+[x] 13. Cache de resultados com Redis  ← video_cache.py + redis[asyncio] no requirements.txt
+    Análises do mesmo vídeo (mesmo hash MD5) não precisam ser reprocessadas.
+    Retornar resultado cacheado em < 10ms.
+    Arquivos:
+      pose-service/main.py (calcular hash do vídeo, checar Redis antes de analisar)
+      pose-service/requirements.txt (adicionar redis)
+    Redis já está no Docker Compose (gymvision-redis).
+
+[x] 14. Fila assíncrona para processamento de vídeo
+    Hoje um vídeo longo bloqueia o servidor inteiro.
+    Solução: POST /analyze-video retorna job_id imediatamente, processa em background,
+    notifica via WebSocket quando terminar.
+    Arquivos:
+      pose-service/main.py (endpoint retorna job_id)
+      pose-service/video_queue.py (novo: worker com asyncio.Queue ou Celery)
+      dashboard/src/hooks/useVideoAnalysis.ts (polling ou WS para status do job)
+
+[x] 15. Armazenamento de vídeos com MinIO
+    Vídeos enviados somem após análise. Armazenar no MinIO (S3-compatible).
+    Adicionar container MinIO ao docker-compose.yml.
+    Arquivos:
+      docker-compose.yml (novo serviço minio)
+      pose-service/main.py (upload para MinIO após análise)
+      pose-service/requirements.txt (minio==7.2.7)
+      pose-service/video_storage.py (novo — cliente MinIO, bucket gymvision-videos)
+
+[x] 16. Guia visual de posicionamento de câmera no app
+    Tela antes de iniciar a sessão mostrando como posicionar o celular.
+    Ícone animado indicando câmera lateral para melhor precisão.
+    Arquivo novo: android-app/.../ui/camera/CameraGuideScreen.kt
+    Arquivo modificado: android-app/.../navigation/AppNavHost.kt
+    Arquivo modificado: android-app/.../navigation/Routes.kt (CAMERA_GUIDE route)
+    Arquivo modificado: android-app/.../navigation/MainScreen.kt (navega para guia)
+
+[x] 17. Gestão de alunos no dashboard
+    Tela para professor cadastrar/editar alunos e ver histórico individual.
+    Arquivo novo: dashboard/src/pages/StudentsPage.tsx
+    Consome: GET/POST /api/v1/users (user-service)
+
+[x] 18. Gamificação no app Android
+    - Pontos por sessão (= avg_score, acumulado), nível a cada 500 pontos
+    - Streak de dias consecutivos com sessões
+    - 12 conquistas desbloqueáveis (first_session, clean_form, streak, level, etc.)
+    - Ranking da academia (leaderboard por score médio)
+    Arquivos novos:
+      analytics-service/src/main.py            (endpoints /gamification/{id} e /my/sessions)
+      android-app/.../ui/achievements/AchievementsScreen.kt
+      android-app/.../ui/achievements/AchievementsViewModel.kt
+      dashboard/src/pages/LeaderboardPage.tsx  (ranking + catálogo de conquistas)
+    Arquivos modificados:
+      android-app/.../model/Models.kt          (GamificationResponse, Achievement, LeaderboardEntry)
+      android-app/.../api/ApiInterfaces.kt     (gamification + leaderboard endpoints)
+      android-app/.../navigation/Routes.kt     (ACHIEVEMENTS route)
+      android-app/.../navigation/MainScreen.kt (aba Conquistas + ícone EmojiEvents)
+      dashboard/src/App.tsx                    (aba Ranking 🏆)
+
+================================================================================
+TIER 5 — MUITO LONGO (dias de trabalho)
+================================================================================
+
+[x] 19. Modo offline no app Android (ML Kit on-device)
+    Detecção de pose e análise de exercícios rodando no dispositivo via ML Kit BlazePose.
+    Sincronização automática quando a internet voltar (WorkManager).
+    Arquivos novos:
+      android-app/.../offline/ConnectivityObserver.kt  (Flow<Boolean> via NetworkCallback)
+      android-app/.../offline/OfflinePoseAnalyzer.kt   (ML Kit AccuratePoseDetector + análise local)
+      android-app/.../offline/LocalFrameStore.kt       (SQLiteOpenHelper para frames pendentes)
+      android-app/.../offline/SyncWorker.kt            (WorkManager: sync quando online)
+    Arquivos modificados:
+      android-app/.../ui/camera/CameraViewModel.kt     (AndroidViewModel + roteamento offline/online)
+      android-app/.../ui/camera/CameraScreen.kt        (OfflineBanner laranja quando sem rede)
+      android-app/.../model/Models.kt                  (DetectedError.jointAngle = null default)
+      app/build.gradle.kts                             (mlkit:pose-detection-accurate, work-runtime-ktx,
+                                                        kotlinx-coroutines-play-services)
+      AndroidManifest.xml                              (meta-data DEPENDENCIES=poseaccurate)
+    BUILD SUCCESSFUL — APK gerado sem erros.
+
+[x] 20. Testes automatizados
+    - Unitários: exercise_analyzer.py — 34 testes passando (detect_phase, calculate_score,
+      squat, deadlift, lunge, bench press, bent-over row, integração ExerciseAnalyzer)
+    - Arquivo novo: pose-service/tests/test_exercise_analyzer.py
+    - pytest==8.2.2 adicionado ao requirements.txt
+    - Pendente: JUnit (Kotlin), Jest (TypeScript), teste de integração RabbitMQ
+
+[x] 21. Plano de treino integrado
+    Professor cria planos no dashboard (exercícios, séries, reps, carga).
+    App mostra o plano do dia e monitora execução automaticamente.
+    Implementado:
+      - session-service: entidades WorkoutPlan + WorkoutPlanItem, migration V4,
+        WorkoutPlanService, WorkoutPlanController (CRUD completo)
+      - ExerciseType enum expandido para incluir BENCH_PRESS e BENT_OVER_ROW
+      - dashboard: WorkoutPlanPage.tsx (nova aba "Planos 📋") — seletor de aluno,
+        formulário de criação com exercícios/séries/reps/carga, cards de plano
+      - Android: WorkoutPlanScreen.kt + WorkoutPlanViewModel.kt — mostra plano do dia
+        (filtrando por dia da semana) ou todos os planos; botão ▶ cria sessão e
+        navega direto para CameraGuideScreen com exercício pré-selecionado
+      - Aba "Treino" (CalendarMonth icon) adicionada à bottom nav do app
+    BUILD SUCCESSFUL em 8s
+
+[x] 22. Multi-tenancy (múltiplas academias)
+    Hoje o sistema tem uma academia hardcoded.
+    Isolar dados por academia com tenant_id em todas as tabelas.
+    Implementado:
+      user-service:
+        - Migration V2: coluna invite_code (VARCHAR 12, unique) na tabela academies;
+          academia demo recebe código "GYMVISION01"
+        - JWT agora inclui claim academy_id (e role) além de userId e email
+        - AcademyRepository: findByInviteCode, existsByName
+        - AcademyService + AcademyController: GET/POST /api/v1/academies,
+          GET /api/v1/academies/{id}, GET /api/v1/academies/code/{code}
+        - RegisterRequest aceita inviteCode opcional — aluno entra na academia no cadastro
+        - POST /api/v1/users/join-academy: vincula usuário existente à academia pelo código
+        - GET /api/v1/users com ?role= e ?academyId= query params
+        - UserDto inclui academyName (nome da academia)
+      session-service:
+        - TenantFilter: extrai academy_id e role do JWT (base64 decode, sem re-validação)
+          e armazena como atributos de request
+        - createSession() valida que academy_id do request bate com o do JWT (exceto ADMIN)
+      analytics-service:
+        - já isolava por academy_id; leaderboard e stats filtram por academy_id na URL
+      Kong gateway:
+        - Rotas /api/v1/academies adicionadas ao user-service
+        - Rota /api/v1/workout-plans adicionada ao session-service
+      dashboard:
+        - AcademyPage.tsx (nova aba "Academias 🏛️" — visível só para ADMIN):
+          lista academias, stats de 30 dias (sessões, reps, alunos ativos),
+          exibe invite_code com botão copiar, busca por código, cria nova academia
+      Android:
+        - UserDto.academyName adicionado
+        - POST /api/v1/users/join-academy na UserApi
+        - ProfileScreen: mostra academyName em vez de academyId;
+          exibe JoinAcademyCard (campo de código + botão) quando sem academia
+        - ProfileViewModel.joinAcademy(): chama API e persiste novo academyId
+      BUILD: user-service BUILD SUCCESSFUL (Docker), session-service BUILD SUCCESSFUL (Docker),
+             Android APK BUILD SUCCESSFUL
+
+[x] 23. Relatório PDF por aluno
+    Geração de PDF mensal usando reportlab (Python) no analytics-service.
+    Conteúdo: header GymVision, resumo do período (sessões/reps/score médio/melhor score),
+    tabela de sessões recentes, tabela de erros mais frequentes, rodapé com timestamp.
+    Endpoint: GET /api/v1/analytics/student/{student_id}/report/pdf?month=YYYY-MM
+    Retorna application/pdf para download direto pelo browser/app.
+    APScheduler (AsyncIOScheduler) agendado para dia 1 de cada mês às 08:00 UTC:
+      - consulta distinct student_ids com sessões no mês anterior
+      - busca e-mail de cada aluno via GET user-service/api/v1/users/{id}
+      - gera PDF e envia por e-mail via smtplib (SMTP_HOST/PORT/USER/PASS/FROM env vars)
+      - email HTML com resumo inline + PDF em anexo
+    Dashboard: botão "Relatório PDF" na StudentProgressPage (download via fetch + Blob)
+    Novas dependências: reportlab>=4.2.0, APScheduler>=3.10.4,<4, httpx>=0.27.0
+
+[ ] 24. Modelo de IA próprio (fine-tuning)
+    Treinar classificador de erros biomecânicos em cima dos landmarks do MediaPipe.
+    Dataset: gravar alunos com erros anotados manualmente.
+    Ferramentas: TensorFlow / PyTorch, MediaPipe Model Maker.
+    Substitui as regras hardcoded em exercise_analyzer.py.
+
+[x] 25. CI/CD com GitHub Actions
+    .github/workflows/ci.yml expandido com jobs:
+      - user-service-test (JDK 17, Postgres + Redis, Gradle test, Jacoco coverage → Codecov)
+      - pose-service-test (Python 3.11, pytest --cov → Codecov)
+      - session-service-build (Gradle build)
+      - analytics-service-test (flake8 lint)
+      - dashboard-build (Node 20, npm ci, npm run build)
+      - android-build (assembleDebug, upload APK como artifact 7 dias)
+      - compose-validate (docker compose config --quiet)
+      - build-and-push (GHCR, precisa de todos os jobs, apenas no branch main):
+          user-service, pose-service, session-service, analytics-service, backup-service
+      - deploy-staging (SSH via appleboy/ssh-action, docker compose pull + up)
+
+[x] 26. Backup automático (PostgreSQL + MongoDB → MinIO)
+    Novo serviço backup-service (Python 3.11-slim + postgresql-client):
+      - backup-service/Dockerfile
+      - backup-service/requirements.txt (minio, pymongo, APScheduler)
+      - backup-service/backup.py:
+          BlockingScheduler cron 03:00 UTC diariamente
+          pg_dump -Fc de gymvision_users + gymvision_sessions (postgres:5432)
+          pg_dump -Fc de gymvision_analyzer (timescale:5432)
+          pymongo export JSON gzipado de gymvision_analytics (mongodb:27017)
+          upload para bucket MinIO "gymvision-backups" com prefixos postgres/ timescale/ mongodb/
+          cleanup de backups com mais de RETENTION_DAYS dias (padrão 30)
+          RUN_ON_START=true para backup imediato ao subir
+    docker-compose.yml: adicionado backup-service com depends_on postgres/timescale/mongodb/minio
+
+[x] 27. Refresh token rotation
+    JÁ IMPLEMENTADO nas sessões anteriores (itens 1-23):
+      RefreshToken entity com tokenHash (SHA-256), revoked, expiresAt
+      refreshToken() marca o token anterior como revoked=true antes de emitir novo par
+      logout() revoga todos os tokens do usuário
+      deleteExpiredAndRevoked() limpa tokens expirados/revogados
+    Verificado no código: AuthService.kt linhas 119-122
+
+[x] 28. LGPD compliance (exportar dados, deletar conta)
+    user-service:
+      - RefreshTokenRepository.deleteAllByUserId() (novo método @Modifying @Query)
+      - UserDataExport DTO (profile, exportedAt, dataNotice)
+      - UserService.deleteAccount(userId, refreshTokenRepository):
+          deleta refresh tokens → deleta user (cascade)
+      - UserService.exportData(userId): retorna UserDataExport com perfil completo
+      - GET /api/v1/users/me/export → 200 + JSON com todos os dados do perfil
+      - DELETE /api/v1/users/me → 204 (sem corpo)
+      - UserController injeta RefreshTokenRepository
+    android-app:
+      - UserApi: @GET me/export e @DELETE me adicionados
+      - ProfileUiState: isExporting, exportedJson, isDeleting, deleteError
+      - ProfileViewModel.exportData(): chama API, armazena JSON no estado
+      - ProfileViewModel.deleteAccount(): chama API, limpa tokens, chama onDeleted()
+      - ProfileScreen: seção "Privacidade e Dados" com:
+          botão "Exportar meus dados" (mostra JSON em AlertDialog)
+          botão "Excluir minha conta" (confirmação via AlertDialog, vermelho)
+          texto LGPD explicativo
+          scroll habilitado (verticalScroll)
+
+================================================================================
+ÚLTIMO PONTO DE PARADA
+================================================================================
+
+Última ação: Itens 1–23 + Sprint 1 (25, 26, 27 já estava, 28) concluídos.
+  - 1-23: todos anteriores
+  - 25: CI/CD GitHub Actions — 7 jobs: testes, builds, APK, push imagens, deploy staging
+  - 26: backup-service — pg_dump + mongo export → MinIO, cron 03:00 UTC, retenção 30 dias
+  - 27: Refresh token rotation — já estava implementado (verificado)
+  - 28: LGPD — DELETE /me + GET /me/export no user-service + tela Android "Privacidade e Dados"
+
+Próximo item: Sprint 2 — item 28 (relatório semanal professor), 29 (auto-detecção), 31 (progressão de carga), 30 (FCM)
+
+Containers rodando: todos saudáveis
+  - gymvision-pose-svc    (healthy) ← Redis, fila assíncrona, MinIO, novos exercícios
+  - gymvision-notify-svc  (Up)      ← Nodemailer, consumer session.ended
+  - gymvision-session-svc (healthy)
+  - gymvision-gateway     (healthy)
+  - gymvision-minio       (healthy)
+  - gymvision-redis       (healthy)
+
+Arquivos novos nesta sessão (além dos 1-14):
+  - pose-service/video_storage.py               (MinIO client)
+  - pose-service/video_cache.py                 (Redis MD5 cache)
+  - pose-service/video_queue.py                 (asyncio.Queue worker)
+  - pose-service/tests/test_exercise_analyzer.py (34 testes pytest)
+  - android-app/.../ui/camera/CameraGuideScreen.kt (guia animado)
+  - dashboard/src/pages/StudentsPage.tsx        (gestão de alunos)
+
+Arquivos modificados:
+  - pose-service/requirements.txt               (minio, pytest)
+  - android-app/.../navigation/Routes.kt        (CAMERA_GUIDE route)
+  - android-app/.../navigation/AppNavHost.kt    (composable CAMERA_GUIDE)
+  - android-app/.../navigation/MainScreen.kt    (navega para guide)
+  - dashboard/src/App.tsx                       (aba Alunos)
+
+Para o item 18 (Gamificação):
+  - analytics-service: endpoint GET /api/v1/analytics/my/achievements
+  - analytics-service: calcular pontos (100 - erros*5 por sessão), streak (dias consecutivos)
+  - android-app: AchievementsScreen.kt (badges + pontuação)
+  - dashboard: LeaderboardPage.tsx (ranking de alunos)
+
+================================================================================

@@ -2,6 +2,7 @@ package com.gymvision.app.ui.components
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -31,16 +32,22 @@ fun phaseLabel(phase: String): String = when (phase.uppercase()) {
 }
 
 fun exerciseLabel(exerciseType: String): String = when (exerciseType.uppercase()) {
-    "SQUAT" -> "Agachamento"
-    "DEADLIFT" -> "Levantamento Terra"
-    "LUNGE" -> "Avanço"
+    "AUTO"          -> "Detectar automaticamente"
+    "SQUAT"         -> "Agachamento"
+    "DEADLIFT"      -> "Levantamento Terra"
+    "LUNGE"         -> "Avanço"
+    "BENCH_PRESS"   -> "Supino"
+    "BENT_OVER_ROW" -> "Remada Curvada"
     else -> exerciseType
 }
 
 fun exerciseIcon(exerciseType: String): ImageVector = when (exerciseType.uppercase()) {
-    "SQUAT" -> Icons.Filled.FitnessCenter
-    "DEADLIFT" -> Icons.Filled.AccessibilityNew
-    "LUNGE" -> Icons.Filled.DirectionsRun
+    "AUTO"          -> Icons.Filled.AutoAwesome
+    "SQUAT"         -> Icons.Filled.FitnessCenter
+    "DEADLIFT"      -> Icons.Filled.AccessibilityNew
+    "LUNGE"         -> Icons.Filled.DirectionsRun
+    "BENCH_PRESS"   -> Icons.Filled.FitnessCenter
+    "BENT_OVER_ROW" -> Icons.Filled.FitnessCenter
     else -> Icons.Filled.FitnessCenter
 }
 
@@ -66,18 +73,22 @@ fun roleLabel(role: String): String = when (role.uppercase()) {
 }
 
 fun errorDescription(errorType: String): String = when (errorType.uppercase()) {
-    "KNEE_CAVE_LEFT" -> "Joelho esquerdo caindo para dentro"
-    "KNEE_CAVE_RIGHT" -> "Joelho direito caindo para dentro"
-    "KNEE_OVER_TOE_LEFT" -> "Joelho esquerdo passando da ponta do pé"
-    "KNEE_OVER_TOE_RIGHT" -> "Joelho direito passando da ponta do pé"
-    "BACK_NOT_STRAIGHT" -> "Costas não estão retas"
-    "DEPTH_INSUFFICIENT" -> "Profundidade insuficiente no movimento"
-    "HEELS_OFF_GROUND" -> "Calcanhares saindo do chão"
-    "BACK_ROUNDED" -> "Costas arredondadas"
-    "HIPS_TOO_HIGH" -> "Quadril subindo muito rápido"
-    "BAR_PATH_DRIFT" -> "Barra se afastando do corpo"
-    "LANDMARK_MISSING" -> "Pontos do corpo não detectados"
-    "LOW_CONFIDENCE" -> "Baixa confiança na detecção"
+    "KNEE_CAVE_LEFT"          -> "Joelho esquerdo caindo para dentro"
+    "KNEE_CAVE_RIGHT"         -> "Joelho direito caindo para dentro"
+    "KNEE_OVER_TOE_LEFT"      -> "Joelho esquerdo passando da ponta do pé"
+    "KNEE_OVER_TOE_RIGHT"     -> "Joelho direito passando da ponta do pé"
+    "BACK_NOT_STRAIGHT"       -> "Costas não estão retas"
+    "DEPTH_INSUFFICIENT"      -> "Profundidade insuficiente no movimento"
+    "HEELS_OFF_GROUND"        -> "Calcanhares saindo do chão"
+    "BACK_ROUNDED"            -> "Costas arredondadas"
+    "HIPS_TOO_HIGH"           -> "Quadril subindo muito rápido"
+    "BAR_PATH_DRIFT"          -> "Barra se afastando do corpo"
+    "ELBOW_FLARE"             -> "Cotovelos muito abertos"
+    "ELBOW_INSUFFICIENT_RANGE"-> "Amplitude insuficiente — desça mais a barra"
+    "WRIST_BENT"              -> "Pulso dobrado — mantenha neutro"
+    "ROW_INCOMPLETE"          -> "Remada incompleta — puxe mais para o corpo"
+    "LANDMARK_MISSING"        -> "Pontos do corpo não detectados"
+    "LOW_CONFIDENCE"          -> "Baixa confiança na detecção"
     else -> errorType.replace("_", " ").lowercase()
         .replaceFirstChar { it.uppercase() }
 }

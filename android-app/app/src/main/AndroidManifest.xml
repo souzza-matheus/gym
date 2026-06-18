@@ -17,6 +17,12 @@
 
         <!-- cleartext: permite HTTP para dev (10.0.2.2). Remover em produção. -->
 
+        <!-- Pré-carrega o modelo de pose do ML Kit no momento da instalação
+             para que funcione completamente offline (sem download em runtime). -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="poseaccurate" />
+
         <activity
             android:name=".MainActivity"
             android:screenOrientation="portrait"

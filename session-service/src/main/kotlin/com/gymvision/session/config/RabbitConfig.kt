@@ -24,12 +24,12 @@ class RabbitConfig {
     @Bean
     fun gymExchange() = TopicExchange("gym.events", true, false)
 
-    @Bean fun bindExerciseResult(q: Queue, e: TopicExchange) =
+    @Bean fun bindExerciseResult() =
         BindingBuilder.bind(exerciseResultQueue()).to(gymExchange()).with("exercise.result.#")
 
-    @Bean fun bindAlertCreated(q: Queue, e: TopicExchange) =
+    @Bean fun bindAlertCreated() =
         BindingBuilder.bind(alertCreatedQueue()).to(gymExchange()).with("alert.created.#")
 
-    @Bean fun bindSessionEnded(q: Queue, e: TopicExchange) =
+    @Bean fun bindSessionEnded() =
         BindingBuilder.bind(sessionEndedQueue()).to(gymExchange()).with("session.ended.#")
 }

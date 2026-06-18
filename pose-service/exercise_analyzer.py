@@ -63,13 +63,15 @@ from angle_calculator import (
     LEFT_HEEL, RIGHT_HEEL,
     LEFT_SHOULDER, RIGHT_SHOULDER,
     LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
+    LEFT_ELBOW, RIGHT_ELBOW,
+    LEFT_WRIST, RIGHT_WRIST,
 )
 
 
 # ── Thresholds (defaults do app Android) ─────────────────────────────────────
 # Squat
 SQUAT_DEPTH_ANGLE_MIN: float    = 90.0
-SQUAT_KNEE_CAVE_THRESHOLD: float = 15.0
+SQUAT_KNEE_CAVE_THRESHOLD: float = 4.0
 SQUAT_BACK_ANGLE_MAX: float     = 45.0
 SQUAT_KNEE_OVER_TOE_MAX: float  = 0.05
 
@@ -81,6 +83,15 @@ DEADLIFT_HIP_ANGLE_STANDING: float = 160.0
 LUNGE_KNEE_ANGLE_FRONT_MIN: float = 85.0
 LUNGE_KNEE_ANGLE_FRONT_MAX: float = 100.0
 LUNGE_BACK_ANGLE_MAX: float       = 40.0
+
+# Bench Press
+BENCH_ELBOW_FLARE_MAX: float       = 80.0   # ângulo ombro-cotovelo-tronco (graus)
+BENCH_ELBOW_DEPTH_MIN: float       = 70.0   # cotovelo precisa descer a pelo menos 70° de flexão
+BENCH_WRIST_DEVIATION_MAX: float   = 0.04   # desvio lateral do pulso em relação ao cotovelo (normalizado)
+
+# Bent-over Row
+ROW_BACK_ANGLE_MAX: float          = 35.0   # lombar não pode ultrapassar 35° de curvatura
+ROW_ELBOW_RANGE_MIN: float         = 120.0  # cotovelo deve chegar a pelo menos 120° (trás)
 
 # Thresholds de orientação para desabilitar regras perspectiva-dependentes
 # (frontal_weight abaixo deste valor → câmera lateral → disable knee cave)
@@ -345,6 +356,157 @@ def _analyze_lunge(
     return errors
 
 
+# ── Análise de Bench Press ────────────────────────────────────────────────────
+
+def _analyze_bench_press(
+    lm: dict,
+    angles: JointAngles,
+    phase: MovementPhase,
+    thresholds: Optional[dict] = None,
+    frontal_weight: float = 0.0,
+) -> list[DetectedError]:
+    """
+    Supino: câmera lateral é ideal. Detecta:
+      1. Cotovelo muito aberto (ELBOW_FLARE) — risco para ombro
+      2. Amplitude insuficiente (ELBOW_INSUFFICIENT_RANGE) — barra não desce o suficiente
+      3. Pulso dobrado (WRIST_BENT) — risco de tendinite
+    """
+    import math
+    errors: list[DetectedError] = []
+    th = thresholds or {}
+
+    elbow_flare_max   = th.get("bench_elbow_flare_max",     BENCH_ELBOW_FLARE_MAX)
+    elbow_depth_min   = th.get("bench_elbow_depth_min",     BENCH_ELBOW_DEPTH_MIN)
+    wrist_dev_max     = th.get("bench_wrist_deviation_max", BENCH_WRIST_DEVIATION_MAX)
+
+    l_sh  = lm.get(LEFT_SHOULDER)
+    r_sh  = lm.get(RIGHT_SHOULDER)
+    l_el  = lm.get(LEFT_ELBOW)
+    r_el  = lm.get(RIGHT_ELBOW)
+    l_wr  = lm.get(LEFT_WRIST)
+    r_wr  = lm.get(RIGHT_WRIST)
+
+    # 1. Cotovelo muito aberto — medido pelo afastamento lateral do cotovelo
+    #    em relação à largura dos ombros (câmera frontal/topo).
+    #    Na câmera lateral usa-se o ângulo ombro-cotovelo no plano XY.
+    if frontal_weight >= 0.5 and l_sh and r_sh and l_el and r_el:
+        sh_width  = abs(r_sh.x - l_sh.x)
+        el_width  = abs(r_el.x - l_el.x)
+        if sh_width > 0:
+            flare_pct = ((el_width - sh_width) / sh_width) * 100
+            if flare_pct > 20:  # cotovelos mais de 20% mais largos que ombros
+                errors.append(DetectedError(
+                    error_type=ErrorType.ELBOW_FLARE,
+                    risk_level=RiskLevel.HIGH,
+                    description=f"Cotovelos muito abertos ({flare_pct:.0f}% além dos ombros) — risco para ombro",
+                    threshold_violated=20.0,
+                ))
+    elif frontal_weight < 0.5 and l_sh and l_el:
+        # Câmera lateral: estima abertura pelo ângulo ombro-cotovelo-ombro no plano XZ
+        dy = l_sh.y - l_el.y
+        dz = abs(l_sh.z - l_el.z)
+        if dy != 0:
+            flare_angle = math.degrees(math.atan2(dz, abs(dy)))
+            if flare_angle > elbow_flare_max:
+                errors.append(DetectedError(
+                    error_type=ErrorType.ELBOW_FLARE,
+                    risk_level=RiskLevel.HIGH,
+                    description=f"Cotovelos muito abertos: {flare_angle:.0f}° (máx {elbow_flare_max:.0f}°)",
+                    joint_angle=flare_angle,
+                    threshold_violated=elbow_flare_max,
+                ))
+
+    # 2. Amplitude insuficiente na fase de descida
+    if phase in (MovementPhase.BOTTOM, MovementPhase.DESCENDING):
+        elbow_angle = angles.left_knee  # reutiliza campo genérico se disponível
+        # Calcula ângulo ombro-cotovelo-pulso para o braço esquerdo
+        if l_sh and l_el and l_wr:
+            import math
+            v1x, v1y = l_sh.x - l_el.x, l_sh.y - l_el.y
+            v2x, v2y = l_wr.x - l_el.x, l_wr.y - l_el.y
+            dot   = v1x * v2x + v1y * v2y
+            mag   = (math.hypot(v1x, v1y) * math.hypot(v2x, v2y))
+            if mag > 0:
+                arm_angle = math.degrees(math.acos(max(-1, min(1, dot / mag))))
+                if arm_angle > elbow_depth_min:
+                    errors.append(DetectedError(
+                        error_type=ErrorType.ELBOW_INSUFFICIENT_RANGE,
+                        risk_level=RiskLevel.MEDIUM,
+                        description=f"Amplitude insuficiente: cotovelo a {arm_angle:.0f}° (desça mais a barra)",
+                        joint_angle=arm_angle,
+                        threshold_violated=elbow_depth_min,
+                    ))
+
+    # 3. Pulso dobrado lateralmente
+    if l_el and l_wr:
+        wrist_dev = abs(l_wr.x - l_el.x)
+        if wrist_dev > wrist_dev_max:
+            errors.append(DetectedError(
+                error_type=ErrorType.WRIST_BENT,
+                risk_level=RiskLevel.MEDIUM,
+                description=f"Pulso dobrado lateralmente ({wrist_dev:.3f}) — mantenha pulso neutro",
+                threshold_violated=wrist_dev_max,
+            ))
+
+    return errors
+
+
+# ── Análise de Bent-over Row ──────────────────────────────────────────────────
+
+def _analyze_bent_over_row(
+    lm: dict,
+    angles: JointAngles,
+    phase: MovementPhase,
+    thresholds: Optional[dict] = None,
+    frontal_weight: float = 0.0,
+) -> list[DetectedError]:
+    """
+    Remada curvada: câmera lateral é ideal. Detecta:
+      1. Lombar arredondada (BACK_ROUNDED)
+      2. Amplitude insuficiente no puxada (ROW_INCOMPLETE) — cotovelo não chega ao tronco
+    """
+    import math
+    errors: list[DetectedError] = []
+    th = thresholds or {}
+
+    back_angle_max   = th.get("row_back_angle_max",    ROW_BACK_ANGLE_MAX)
+    elbow_range_min  = th.get("row_elbow_range_min",   ROW_ELBOW_RANGE_MIN)
+
+    # 1. Lombar arredondada — mesmo critério do deadlift
+    if angles.back_angle is not None and angles.back_angle > back_angle_max:
+        risk = RiskLevel.HIGH if angles.back_angle > back_angle_max * 1.5 else RiskLevel.MEDIUM
+        errors.append(DetectedError(
+            error_type=ErrorType.BACK_ROUNDED,
+            risk_level=risk,
+            description=f"Lombar arredondada: {angles.back_angle:.0f}° (máx {back_angle_max:.0f}°) — risco de lesão",
+            joint_angle=angles.back_angle,
+            threshold_violated=back_angle_max,
+        ))
+
+    # 2. Amplitude insuficiente: cotovelo não passa do tronco na fase de puxada
+    if phase in (MovementPhase.BOTTOM, MovementPhase.ASCENDING):
+        l_sh = lm.get(LEFT_SHOULDER)
+        l_el = lm.get(LEFT_ELBOW)
+        l_wr = lm.get(LEFT_WRIST)
+        if l_sh and l_el and l_wr:
+            v1x, v1y = l_sh.x - l_el.x, l_sh.y - l_el.y
+            v2x, v2y = l_wr.x - l_el.x, l_wr.y - l_el.y
+            dot = v1x * v2x + v1y * v2y
+            mag = math.hypot(v1x, v1y) * math.hypot(v2x, v2y)
+            if mag > 0:
+                arm_angle = math.degrees(math.acos(max(-1, min(1, dot / mag))))
+                if arm_angle < elbow_range_min:
+                    errors.append(DetectedError(
+                        error_type=ErrorType.ROW_INCOMPLETE,
+                        risk_level=RiskLevel.MEDIUM,
+                        description=f"Remada incompleta: cotovelo a {arm_angle:.0f}° (puxe mais até {elbow_range_min:.0f}°)",
+                        joint_angle=arm_angle,
+                        threshold_violated=elbow_range_min,
+                    ))
+
+    return errors
+
+
 # ── Score ─────────────────────────────────────────────────────────────────────
 
 def calculate_score(errors: list[DetectedError], phase: MovementPhase) -> float:
@@ -461,6 +623,10 @@ class ExerciseAnalyzer:
             errors = _analyze_deadlift(lm_map, angles, phase, th, frontal_weight)
         elif request.exercise_type == ExerciseType.LUNGE:
             errors = _analyze_lunge(lm_map, angles, phase, th, frontal_weight)
+        elif request.exercise_type == ExerciseType.BENCH_PRESS:
+            errors = _analyze_bench_press(lm_map, angles, phase, th, frontal_weight)
+        elif request.exercise_type == ExerciseType.BENT_OVER_ROW:
+            errors = _analyze_bent_over_row(lm_map, angles, phase, th, frontal_weight)
         else:
             errors = []
 

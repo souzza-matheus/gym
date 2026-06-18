@@ -161,7 +161,8 @@ fun SessionListScreen(
             onSelectExercise = { exerciseType ->
                 viewModel.createSession(exerciseType) { session ->
                     showNewSessionSheet = false
-                    onOpenCamera(session.id, session.exerciseType, viewModel.studentId, viewModel.academyId)
+                    // Passa o tipo original (pode ser "AUTO") para que CameraViewModel inicie detecção
+                    onOpenCamera(session.id, exerciseType, viewModel.studentId, viewModel.academyId)
                 }
             },
         )
@@ -282,7 +283,7 @@ private fun NewSessionSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            listOf("SQUAT", "DEADLIFT", "LUNGE").forEach { exerciseType ->
+            listOf("AUTO", "SQUAT", "DEADLIFT", "LUNGE", "BENCH_PRESS", "BENT_OVER_ROW").forEach { exerciseType ->
                 ExerciseOption(
                     exerciseType = exerciseType,
                     enabled = !isCreating,
@@ -349,8 +350,11 @@ private fun ExerciseOption(exerciseType: String, enabled: Boolean, onClick: () -
 }
 
 private fun exerciseDescription(exerciseType: String): String = when (exerciseType) {
-    "SQUAT" -> "Agachamento livre"
-    "DEADLIFT" -> "Levantamento terra"
-    "LUNGE" -> "Avanço alternado"
+    "AUTO"          -> "Detectamos automaticamente em ~2 segundos"
+    "SQUAT"         -> "Agachamento livre"
+    "DEADLIFT"      -> "Levantamento terra"
+    "LUNGE"         -> "Avanço alternado"
+    "BENCH_PRESS"   -> "Supino com barra ou haltere"
+    "BENT_OVER_ROW" -> "Remada curvada bilateral"
     else -> ""
 }

@@ -1,0 +1,9 @@
+{
+  "error_accuracy": {
+    "BACK_ROUNDED": 0.9994,
+    "HIPS_TOO_HIGH": 1.0
+  },
+  "score_mae": 0.007224301881246294,
+  "n_train": 7200,
+  "n_test": 1800
+}

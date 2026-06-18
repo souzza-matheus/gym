@@ -83,7 +83,15 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // Bridge entre Tasks do Google e coroutines (ML Kit await())
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
+
+    // ML Kit — detecção de pose on-device (modelo BlazePose preciso, 33 landmarks)
+    implementation("com.google.mlkit:pose-detection-accurate:18.0.0-beta3")
+
+    // WorkManager — sincronização em background quando voltar online
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }

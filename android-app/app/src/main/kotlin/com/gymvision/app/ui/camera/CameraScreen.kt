@@ -2,6 +2,7 @@ package com.gymvision.app.ui.camera
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.speech.tts.TextToSpeech
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -33,8 +34,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
@@ -51,6 +54,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.sp
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +75,7 @@ import com.gymvision.app.model.WsAlert
 import com.gymvision.app.service.GymWebSocketService
 import com.gymvision.app.ui.components.ScoreGauge
 import com.gymvision.app.ui.components.errorIcon
+import com.gymvision.app.ui.components.exerciseLabel
 import com.gymvision.app.ui.components.phaseLabel
 import com.gymvision.app.ui.components.riskColor
 import com.gymvision.app.ui.theme.RiskLow
@@ -89,6 +95,15 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val tts = remember {
+        var engine: TextToSpeech? = null
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) engine?.language = Locale("pt", "BR")
+        }
+        engine
+    }
+    DisposableEffect(Unit) { onDispose { tts?.shutdown() } }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -110,11 +125,13 @@ fun CameraScreen(
 
     var showEndDialog by remember { mutableStateOf(false) }
     var alertBanner by remember { mutableStateOf<WsAlert?>(null) }
+    var showExercisePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         GymWebSocketService.alerts.collect { alert ->
             if (alert.studentId == studentId) {
                 alertBanner = alert
+                tts?.speak(alert.description, TextToSpeech.QUEUE_FLUSH, null, alert.errorType)
             }
         }
     }
@@ -148,6 +165,8 @@ fun CameraScreen(
             ScoreGaugeBadge(score = state.score)
             Spacer(modifier = Modifier.width(12.dp))
             PhaseChip(phase = state.phase)
+            Spacer(modifier = Modifier.width(12.dp))
+            RepCounterBadge(repCount = state.repCount)
         }
 
         FloatingActionButton(
@@ -174,13 +193,83 @@ fun CameraScreen(
             alertBanner?.let { AlertBanner(it) }
         }
 
+        // Faixa de modo offline — aparece abaixo do score/phase quando sem rede
+        if (state.isOffline) {
+            OfflineBanner(
+                pendingFrames = state.pendingFrames,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp),
+            )
+        }
+
+        // Faixa de escaneamento durante auto-detecção
+        if (state.autoDetectPhase == AutoDetectPhase.DETECTING) {
+            AutoDetectScanBanner(
+                progress = state.detectionProgress,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp, start = 16.dp, end = 16.dp),
+            )
+        }
+
         ErrorsCard(
-            errors = state.errors,
+            errors = if (state.autoDetectPhase != null && state.autoDetectPhase != AutoDetectPhase.CONFIRMED)
+                emptyList() else state.errors,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(16.dp),
+        )
+    }
+
+    // Diálogo de confirmação do exercício detectado
+    if (state.autoDetectPhase == AutoDetectPhase.CONFIRMING) {
+        val detected = state.detectedExercise ?: "SQUAT"
+        val pct = (state.detectionConfidence * 100).toInt()
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            title = { Text("Exercício detectado") },
+            text = {
+                Text(
+                    "Identificamos: ${exerciseLabel(detected)} ($pct% de confiança).\n" +
+                    "Confirmar ou escolher manualmente?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmDetection() }) { Text("Confirmar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExercisePicker = true }) { Text("Escolher") }
+            },
+        )
+    }
+
+    // Seletor manual de exercício (quando usuário rejeita a detecção)
+    if (showExercisePicker) {
+        AlertDialog(
+            onDismissRequest = { showExercisePicker = false },
+            title = { Text("Escolha o exercício") },
+            text = {
+                Column {
+                    listOf("SQUAT", "DEADLIFT", "LUNGE", "BENCH_PRESS", "BENT_OVER_ROW").forEach { ex ->
+                        TextButton(
+                            onClick = {
+                                showExercisePicker = false
+                                viewModel.overrideExercise(ex)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(exerciseLabel(ex), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
         )
     }
 
@@ -202,6 +291,38 @@ fun CameraScreen(
                 TextButton(onClick = { showEndDialog = false }) { Text("Cancelar") }
             },
         )
+    }
+}
+
+@Composable
+private fun AutoDetectScanBanner(progress: Int, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f),
+        shadowElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = null, tint = Color.White,
+                modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Detectando exercício... ($progress/10)",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Fique na posição inicial do exercício",
+                    color = Color.White.copy(alpha = 0.8f),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
     }
 }
 
@@ -300,6 +421,31 @@ private fun ScoreGaugeBadge(score: Float) {
 }
 
 @Composable
+private fun RepCounterBadge(repCount: Int) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.4f))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "$repCount",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "reps",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun PhaseChip(phase: String) {
     Box(
         modifier = Modifier
@@ -330,6 +476,38 @@ private fun AlertBanner(alert: WsAlert) {
             Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(12.dp))
             Text(alert.description, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun OfflineBanner(pendingFrames: Int, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = Color(0xFFE65100),
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.WifiOff,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (pendingFrames > 0)
+                    "OFFLINE · $pendingFrames frames pendentes"
+                else
+                    "OFFLINE · análise local ativa",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }

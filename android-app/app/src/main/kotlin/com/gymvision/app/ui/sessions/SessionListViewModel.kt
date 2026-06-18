@@ -69,7 +69,9 @@ class SessionListViewModel : ViewModel() {
         viewModelScope.launch {
             uiState = uiState.copy(isCreating = true, error = null)
             runCatching {
-                ApiClient.sessionApi.create(CreateSessionRequest(studentId, academyId, exerciseType))
+                // "AUTO" não existe no backend — salva como UNKNOWN e a detecção roda no app
+                val backendType = if (exerciseType == "AUTO") "UNKNOWN" else exerciseType
+                ApiClient.sessionApi.create(CreateSessionRequest(studentId, academyId, backendType))
             }.onSuccess { response ->
                 val session = response.body()?.data
                 uiState = uiState.copy(isCreating = false)

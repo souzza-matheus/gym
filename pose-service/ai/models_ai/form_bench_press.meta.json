@@ -1,0 +1,10 @@
+{
+  "error_accuracy": {
+    "ELBOW_FLARE": 0.9994,
+    "ELBOW_INSUFFICIENT_RANGE": 1.0,
+    "WRIST_BENT": 1.0
+  },
+  "score_mae": 0.3740689051523618,
+  "n_train": 7200,
+  "n_test": 1800
+}

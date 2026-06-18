@@ -19,7 +19,8 @@ data class UserDto(
     val name: String,
     val email: String,
     val role: String,
-    val academyId: String?
+    val academyId: String?,
+    val academyName: String? = null,
 )
 
 data class ApiResponse<T>(
@@ -51,7 +52,7 @@ data class DetectedError(
     @SerializedName("error_type")  val errorType: String,
     @SerializedName("risk_level")  val riskLevel: String,   // LOW | MEDIUM | HIGH
     val description: String,
-    @SerializedName("joint_angle") val jointAngle: Float?
+    @SerializedName("joint_angle") val jointAngle: Float? = null
 )
 
 data class ExerciseAnalysis(
@@ -71,6 +72,14 @@ data class PoseAnalysisResponse(
     @SerializedName("frame_width")    val frameWidth: Int,
     @SerializedName("frame_height")   val frameHeight: Int,
     val analysis: ExerciseAnalysis?
+)
+
+data class ExerciseDetectionResponse(
+    @SerializedName("exercise_type") val exerciseType: String,
+    val confidence: Float,
+    val reason: String,
+    val landmarks: List<Landmark>,
+    @SerializedName("landmark_count") val landmarkCount: Int,
 )
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -157,3 +166,63 @@ data class StudentAnalyticsResponse(
     @SerializedName("overall_stats")   val overallStats: OverallStats,
     @SerializedName("top_errors")      val topErrors: List<TopError>
 )
+
+// ── Gamificação ───────────────────────────────────────────────────────────────
+
+data class Achievement(
+    val key: String,
+    val name: String,
+    val description: String,
+    val icon: String
+)
+
+data class LeaderboardEntry(
+    val rank: Int,
+    @SerializedName("student_id") val studentId: String,
+    @SerializedName("avg_score")  val avgScore: Double,
+    val sessions: Int,
+    @SerializedName("total_reps") val totalReps: Int
+)
+
+data class LeaderboardResponse(
+    @SerializedName("academy_id")  val academyId: String,
+    val leaderboard: List<LeaderboardEntry>
+)
+
+data class GamificationResponse(
+    @SerializedName("student_id")        val studentId: String,
+    val points: Int,
+    val level: Int,
+    @SerializedName("next_level_points") val nextLevelPoints: Int,
+    @SerializedName("streak_days")       val streakDays: Int,
+    @SerializedName("total_sessions")    val totalSessions: Int,
+    @SerializedName("clean_sessions")    val cleanSessions: Int,
+    @SerializedName("total_reps")        val totalReps: Int,
+    @SerializedName("best_score")        val bestScore: Double,
+    val achievements: List<Achievement>
+)
+
+// ── Plano de treino ───────────────────────────────────────────────────────────
+
+data class WorkoutPlanItem(
+    val id: String,
+    @SerializedName("exercise_type") val exerciseType: String,
+    val sets: Int,
+    @SerializedName("reps_per_set")  val repsPerSet: Int,
+    @SerializedName("load_kg")       val loadKg: Double?,
+    val notes: String?,
+    @SerializedName("order_index")   val orderIndex: Int,
+)
+
+data class WorkoutPlan(
+    val id: String,
+    @SerializedName("student_id")   val studentId: String,
+    @SerializedName("academy_id")   val academyId: String,
+    @SerializedName("professor_id") val professorId: String,
+    val name: String,
+    @SerializedName("day_of_week")  val dayOfWeek: Int?,
+    val active: Boolean,
+    val items: List<WorkoutPlanItem>,
+)
+
+data class WorkoutPlanListResponse(val data: List<WorkoutPlan>)

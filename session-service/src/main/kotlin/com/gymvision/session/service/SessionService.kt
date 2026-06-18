@@ -2,8 +2,11 @@ package com.gymvision.session.service
 
 import com.gymvision.session.model.*
 import com.gymvision.session.repository.*
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.context.request.RequestContextHolder
+import org.springframework.web.context.request.ServletRequestAttributes
 import java.time.Instant
 import java.util.UUID
 
@@ -70,6 +73,15 @@ class SessionService(
 
     @Transactional
     fun createSession(req: CreateSessionRequest): SessionSummary {
+        // Tenant guard: rejeita se academy_id do JWT não bater com o do request
+        // (exceto ADMIN, que pode criar em qualquer academia)
+        val httpReq = currentHttpRequest()
+        val tenantAcademyId = httpReq?.getAttribute("tenantAcademyId") as? String
+        val tenantRole      = httpReq?.getAttribute("tenantRole") as? String
+        if (tenantAcademyId != null && tenantRole != "ADMIN"
+            && tenantAcademyId != req.academyId.toString()
+        ) throw IllegalStateException("Acesso negado: academia não corresponde ao token")
+
         val type = runCatching { ExerciseType.valueOf(req.exerciseType.uppercase()) }
             .getOrDefault(ExerciseType.UNKNOWN)
         val session = sessionRepo.save(
@@ -77,6 +89,9 @@ class SessionService(
         )
         return session.toSummary()
     }
+
+    private fun currentHttpRequest(): HttpServletRequest? =
+        (RequestContextHolder.getRequestAttributes() as? ServletRequestAttributes)?.request
 
     fun getSession(id: UUID): SessionSummary =
         sessionRepo.findById(id).orElseThrow { NoSuchElementException("Sessão não encontrada: $id") }.toSummary()

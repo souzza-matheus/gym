@@ -36,6 +36,8 @@ LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
 LEFT_ELBOW     = 13
 RIGHT_ELBOW    = 14
+LEFT_WRIST     = 15
+RIGHT_WRIST    = 16
 LEFT_HIP       = 23
 RIGHT_HIP      = 24
 LEFT_KNEE      = 25
@@ -262,9 +264,9 @@ def _angles_frontal(lm: dict[int, LandmarkInput]) -> JointAngles:
 
     Estratégia:
       - Joelhos/quadris/tornozelos: calcula ambos os lados separadamente.
-      - Back angle: usa a inclinação lateral do tronco (desvio de simetria
-        entre ombros e quadris — frontal é o ângulo mais informativo para
-        detectar inclinação lateral do tronco).
+      - Back angle: combina inclinação lateral (eixo X) e inclinação sagital
+        para frente (eixo Z do MediaPipe). Retorna o maior dos dois, de forma
+        que BACK_NOT_STRAIGHT dispara tanto para lean lateral quanto frontal.
       - Hip hinge: usando a diferença vertical entre ombros e quadris
         (câmera frontal vê a flexão do tronco como aproximação das y's).
     """
@@ -302,10 +304,10 @@ def _angles_frontal(lm: dict[int, LandmarkInput]) -> JointAngles:
         right_ankle_angle = calculate_angle(r_knee, r_ankle, r_foot)
 
     # ── Back angle (frontal) ───────────────────────────────────────────────
-    # Na câmera frontal, o back_angle é a inclinação lateral do tronco
-    # (ombros não horizontais → tronco inclinado lateralmente).
-    # Calculado como ângulo da linha ombro-quadril em relação à vertical.
-    back_angle = _frontal_back_angle(l_sh, r_sh, l_hip, r_hip)
+    # Combina inclinação lateral (eixo X) e inclinação sagital para frente
+    # (eixo Z — coordenada de profundidade do MediaPipe). Toma o maior dos dois
+    # para que BACK_NOT_STRAIGHT dispare tanto por lean lateral quanto frontal.
+    back_angle = _frontal_back_angle_combined(l_sh, r_sh, l_hip, r_hip)
 
     # ── Hip hinge (frontal) ────────────────────────────────────────────────
     # Na câmera frontal, a flexão do quadril aparece como redução da distância
@@ -338,14 +340,8 @@ def _frontal_back_angle(
     r_hip: Optional[LandmarkInput],
 ) -> Optional[float]:
     """
-    Calcula o back_angle para câmera frontal.
-
-    Usa o centróide dos ombros e o centróide dos quadris para calcular
-    a inclinação lateral do tronco (desvio em relação à vertical).
-
-    Se apenas um lado está disponível, usa o lado disponível.
+    Inclinação LATERAL do tronco em câmera frontal (desvio X em relação à vertical).
     """
-    # Centróide dos ombros
     if l_sh and r_sh:
         sh_x = (l_sh.x + r_sh.x) / 2.0
         sh_y = (l_sh.y + r_sh.y) / 2.0
@@ -356,7 +352,6 @@ def _frontal_back_angle(
     else:
         return None
 
-    # Centróide dos quadris
     if l_hip and r_hip:
         hip_x = (l_hip.x + r_hip.x) / 2.0
         hip_y = (l_hip.y + r_hip.y) / 2.0
@@ -370,6 +365,62 @@ def _frontal_back_angle(
     dy = hip_y - sh_y
     dx = hip_x - sh_x
     return round(math.degrees(math.atan2(abs(dx), abs(dy))), 2)
+
+
+def _frontal_back_angle_combined(
+    l_sh: Optional[LandmarkInput],
+    r_sh: Optional[LandmarkInput],
+    l_hip: Optional[LandmarkInput],
+    r_hip: Optional[LandmarkInput],
+) -> Optional[float]:
+    """
+    Back angle para câmera frontal combinando inclinação lateral (eixo X) e
+    inclinação sagital para frente (eixo Z do MediaPipe).
+
+    O MediaPipe Pose estima a coordenada Z com escala proporcional à largura
+    dos quadris (Z<0 = à frente do plano dos quadris). Quando a pessoa inclina
+    o tronco para frente, o centróide dos ombros fica com Z muito menor que o
+    centróide dos quadris (ombro avança em relação ao quadril).
+
+    Fórmula: lean_sagital = atan2(max(hip_z - sh_z, 0), hip_y - sh_y)
+    Retorna o maior entre a inclinação lateral e a sagital.
+    """
+    lateral = _frontal_back_angle(l_sh, r_sh, l_hip, r_hip)
+
+    # Centróide Z e Y dos ombros
+    if l_sh and r_sh:
+        sh_z = (l_sh.z + r_sh.z) / 2.0
+        sh_y = (l_sh.y + r_sh.y) / 2.0
+    elif l_sh:
+        sh_z, sh_y = l_sh.z, l_sh.y
+    elif r_sh:
+        sh_z, sh_y = r_sh.z, r_sh.y
+    else:
+        return lateral
+
+    # Centróide Z e Y dos quadris
+    if l_hip and r_hip:
+        hip_z = (l_hip.z + r_hip.z) / 2.0
+        hip_y = (l_hip.y + r_hip.y) / 2.0
+    elif l_hip:
+        hip_z, hip_y = l_hip.z, l_hip.y
+    elif r_hip:
+        hip_z, hip_y = r_hip.z, r_hip.y
+    else:
+        return lateral
+
+    dy = hip_y - sh_y
+    if dy <= 0:
+        return lateral  # caso degenerado (ombro abaixo do quadril)
+
+    # Componente sagital: ombro à frente do quadril → hip_z > sh_z
+    # Usamos max(..., 0) para ignorar ruído de lean para trás
+    forward_dz = max(hip_z - sh_z, 0.0)
+    sagittal = round(math.degrees(math.atan2(forward_dz, dy)), 2)
+
+    if lateral is None:
+        return sagittal
+    return max(lateral, sagittal)
 
 
 # ── Modo ANGLED (blend ponderado) ─────────────────────────────────────────────

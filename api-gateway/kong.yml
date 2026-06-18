@@ -6,11 +6,23 @@ services:
     url: http://user-service:8081
     routes:
       - name: auth-routes
-        paths: ["/api/v1/auth", "/api/v1/users"]
+        paths: ["/api/v1/auth", "/api/v1/users", "/api/v1/academies"]
         strip_path: false
     plugins:
       - name: rate-limiting
         config: { minute: 60, policy: local }
+
+  - name: pose-service-video
+    url: http://pose-service:8083
+    routes:
+      - name: pose-video-route
+        paths: ["/api/v1/pose/analyze-video"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 10, hour: 50, policy: local }
+      - name: request-size-limiting
+        config: { allowed_payload_size: 512 }
 
   - name: pose-service
     url: http://pose-service:8083
@@ -20,7 +32,7 @@ services:
         strip_path: false
     plugins:
       - name: rate-limiting
-        config: { minute: 600, policy: local }
+        config: { minute: 300, policy: local }
       - name: request-size-limiting
         config: { allowed_payload_size: 512 }
 
@@ -28,7 +40,7 @@ services:
     url: http://session-service:8082
     routes:
       - name: session-routes
-        paths: ["/api/v1/sessions"]
+        paths: ["/api/v1/sessions", "/api/v1/workout-plans"]
         strip_path: false
     plugins:
       - name: rate-limiting

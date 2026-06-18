@@ -9,9 +9,22 @@ Ambos persistem no TimescaleDB e publicam no RabbitMQ.
 """
 
 import asyncio
+import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({
+            "ts":      self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "service": "pose-service",
+            "level":   record.levelname,
+            "msg":     record.getMessage(),
+            **({"exc": self.formatException(record.exc_info)} if record.exc_info else {}),
+        })
 
 import cv2
 import numpy as np
@@ -21,8 +34,11 @@ from pydantic import BaseModel
 
 import messaging
 import timescale_client as tsdb
+import video_cache as cache
+import video_queue as vqueue
+import video_storage as storage
 from config import settings
-from exercise_analyzer import ExerciseAnalyzer
+from ai_exercise_analyzer import ExerciseAnalyzer
 from models import (
     ExerciseAnalysis, ExerciseType, HealthResponse,
     PoseAnalysisResponse, MovementPhase, JointAngles,
@@ -30,7 +46,10 @@ from models import (
 from tf_serving_client import tf_client
 from video_analyzer import VideoAnalyzer
 
-logging.basicConfig(level=logging.INFO)
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+logging.root.setLevel(logging.INFO)
+logging.root.handlers = [_handler]
 log = logging.getLogger(__name__)
 
 _analyzer: ExerciseAnalyzer = ExerciseAnalyzer()
@@ -44,11 +63,16 @@ async def lifespan(app: FastAPI):
     tf_client.connect()
     await messaging.connect()
     await tsdb.connect()
+    await cache.connect()
+    storage.connect()
     _video_analyzer = VideoAnalyzer(tf_client, _analyzer)
+    vqueue.start_worker(_video_analyzer, messaging)
     log.info("Pronto — frame mode + video mode + timescaledb ativos.")
     yield
+    vqueue.stop_worker()
     await messaging.disconnect()
     await tsdb.disconnect()
+    await cache.disconnect()
     tf_client.close()
     log.info("Serviço encerrado.")
 
@@ -164,6 +188,53 @@ async def analyze_pose(
     )
 
 
+# ── Auto-detecção de exercício ────────────────────────────────────────────────
+
+class ExerciseDetectionResponse(BaseModel):
+    exercise_type: str
+    confidence: float
+    reason: str
+    landmarks: list
+    landmark_count: int
+
+
+@app.post(
+    "/api/v1/pose/detect-exercise",
+    response_model=ExerciseDetectionResponse,
+    summary="Detecta o tipo de exercício automaticamente a partir de um frame",
+)
+async def detect_exercise(
+    frame:      UploadFile = File(..., description="Frame JPEG da câmera"),
+    session_id: str        = Form(default="no-session"),
+    student_id: str        = Form(default="no-student"),
+):
+    if frame.content_type not in ("image/jpeg", "image/png", "application/octet-stream"):
+        raise HTTPException(415, f"Content-Type inválido: {frame.content_type}")
+
+    frame_bytes = await frame.read()
+    if not frame_bytes:
+        raise HTTPException(400, "Frame vazio.")
+
+    try:
+        landmarks, inference_ms, orientation = tf_client.predict(frame_bytes)
+    except Exception as e:
+        raise HTTPException(500, f"Erro na detecção de pose: {e}")
+
+    from ai_exercise_classifier import classify_single
+    result = classify_single(landmarks)
+
+    log.info("detect-exercise session=%s result=%s conf=%.2f",
+             session_id, result.exercise_type.value, result.confidence)
+
+    return ExerciseDetectionResponse(
+        exercise_type=result.exercise_type.value,
+        confidence=round(result.confidence, 3),
+        reason=result.reason,
+        landmarks=[lm.dict() for lm in landmarks],
+        landmark_count=len(landmarks),
+    )
+
+
 # ── MODO 2: Upload de vídeo ───────────────────────────────────────────────────
 
 class VideoAnalysisResponse(BaseModel):
@@ -240,6 +311,13 @@ async def analyze_video(
     if _video_analyzer is None:
         raise HTTPException(503, "VideoAnalyzer não inicializado.")
 
+    # Verifica cache Redis antes de processar
+    cache_key = cache.video_hash(video_bytes, exercise_type, frame_interval_ms)
+    cached = await cache.get(cache_key)
+    if cached:
+        log.info('{"ts":null,"service":"pose-service","level":"INFO","msg":"cache hit para vídeo %s"}', cache_key[:16])
+        return VideoAnalysisResponse(**cached)
+
     try:
         report = await _video_analyzer.analyze(
             video_bytes=video_bytes,
@@ -255,8 +333,24 @@ async def analyze_video(
         log.error("Erro na análise de vídeo: %s", e, exc_info=True)
         raise HTTPException(500, f"Erro interno na análise: {e}")
 
-    # Publica resumo do vídeo no RabbitMQ
+    # Publica alertas reais e resumo no RabbitMQ
     if report.total_frames_analyzed > 0:
+        # 1. Alertas individuais → gym.alert.created → WebSocket do professor
+        for alert in report.professor_alerts:
+            asyncio.create_task(messaging.publish_alert(
+                session_id=session_id,
+                student_id=student_id,
+                academy_id=academy_id,
+                exercise_type=exercise_type,
+                error_type=alert["error_type"],
+                risk_level=alert["risk_level"],
+                description=alert["description"],
+                joint_angle=alert.get("joint_angle"),
+                score=alert["score"],
+                phase=alert["phase"],
+            ))
+
+        # 2. Resumo da sessão → gym.exercise.result (score médio, has_alert)
         dummy = SimpleNamespace(
             session_id=session_id, student_id=student_id,
             exercise_type=ex_type,
@@ -271,10 +365,81 @@ async def analyze_video(
         )
         asyncio.create_task(messaging.publish_result(dummy, academy_id))
 
+    # Salva no cache para reutilização e faz upload para MinIO em background
+    await cache.set(cache_key, report.__dict__)
+    asyncio.create_task(storage.upload_video(
+        video_bytes, session_id, academy_id,
+        content_type=video.content_type or "video/mp4",
+    ))
+
     return VideoAnalysisResponse(**report.__dict__)
 
 
+# ── MODO 2b: Upload de vídeo assíncrono ──────────────────────────────────────
+
+@app.post(
+    "/api/v1/pose/analyze-video/async",
+    summary="Enfileira análise de vídeo — retorna job_id imediatamente",
+)
+async def analyze_video_async(
+    video:             UploadFile = File(...),
+    exercise_type:     str        = Form(...),
+    session_id:        str        = Form(default="video-session"),
+    student_id:        str        = Form(default="video-student"),
+    academy_id:        str        = Form(default="unknown"),
+    frame_interval_ms: float      = Form(default=200.0),
+):
+    allowed = ("video/mp4","video/quicktime","video/x-msvideo",
+               "video/avi","application/octet-stream")
+    if video.content_type not in allowed:
+        raise HTTPException(415, f"Formato não suportado: {video.content_type}")
+    video_bytes = await video.read()
+    if not video_bytes:
+        raise HTTPException(400, "Arquivo vazio.")
+    if len(video_bytes) > 500 * 1024 * 1024:
+        raise HTTPException(413, "Vídeo muito grande (máx 500 MB).")
+    try:
+        ExerciseType(exercise_type.upper())
+    except ValueError:
+        raise HTTPException(400, f"exercise_type inválido: '{exercise_type}'")
+
+    job_id = await vqueue.enqueue(
+        video_bytes=video_bytes,
+        exercise_type=exercise_type.upper(),
+        session_id=session_id,
+        student_id=student_id,
+        academy_id=academy_id,
+        frame_interval=frame_interval_ms,
+    )
+    return {"job_id": job_id, "status": "queued",
+            "poll_url": f"/api/v1/pose/analyze-video/status/{job_id}"}
+
+
+@app.get(
+    "/api/v1/pose/analyze-video/status/{job_id}",
+    summary="Consulta status de um job de análise de vídeo assíncrono",
+)
+async def video_job_status(job_id: str):
+    status = await vqueue.get_job_status(job_id)
+    if status is None:
+        raise HTTPException(404, f"Job '{job_id}' não encontrado ou expirado.")
+    return status
+
+
 # ── Extras: TimescaleDB queries ───────────────────────────────────────────────
+
+@app.get("/api/v1/pose/videos/{academy_id}/{session_id}",
+         summary="Gera URL de download do vídeo armazenado no MinIO (válida 7 dias)")
+async def video_download_url(academy_id: str, session_id: str):
+    if not storage.is_connected():
+        raise HTTPException(503, "Storage de vídeos indisponível.")
+    import time as _time
+    key = f"{academy_id}/{session_id}/{int(_time.time())}.mp4"
+    url = storage.presigned_url(key)
+    if not url:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    return {"url": url, "expires_in": "7 dias"}
+
 
 @app.get("/api/v1/pose/sessions/{session_id}/timeline",
          summary="Timeline de score de uma sessão (TimescaleDB)")

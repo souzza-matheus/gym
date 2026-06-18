@@ -71,6 +71,13 @@ services:
       RABBITMQ_USER: gymvision
       RABBITMQ_PASS: gymvision123
       TIMESCALE_URL: postgresql://gymvision:gymvision123@timescale:5432/gymvision_analyzer
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: gymvision123
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: gymvision
+      MINIO_SECRET_KEY: gymvision123
+      MINIO_BUCKET: gymvision-videos
     ports:
       - "8083:8083"
     depends_on:
@@ -78,6 +85,12 @@ services:
         condition: service_healthy
       timescale:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     networks:
       - gymvision-net
     restart: unless-stopped
@@ -271,12 +284,74 @@ services:
       - gymvision-net
     restart: unless-stopped
 
+  # ── Backup Service (diário 03:00 UTC → MinIO gymvision-backups) ──────────
+  backup-service:
+    build:
+      context: ./backup-service
+      dockerfile: Dockerfile
+    container_name: gymvision-backup
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: gymvision
+      PG_PASS: gymvision123
+      PG_DBS: "gymvision_users,gymvision_sessions"
+      TS_HOST: timescale
+      TS_PORT: "5432"
+      TS_USER: gymvision
+      TS_PASS: gymvision123
+      TS_DBS: "gymvision_analyzer"
+      MONGO_URL: "mongodb://gymvision:gymvision123@mongodb:27017/?authSource=admin"
+      MONGO_DBS: "gymvision_analytics"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: gymvision
+      MINIO_SECRET_KEY: gymvision123
+      MINIO_BUCKET: gymvision-backups
+      RETENTION_DAYS: "30"
+      RUN_ON_START: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      timescale:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
+  # ── MinIO (Object Storage para vídeos) ───────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: gymvision-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     gymvision
+      MINIO_ROOT_PASSWORD: gymvision123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gymvision-net
+    restart: unless-stopped
+
 volumes:
   pgdata:
   tsdata:
   redisdata:
   rabbitmqdata:
   mongodata:
+  miniodata:
 
 networks:
   gymvision-net:

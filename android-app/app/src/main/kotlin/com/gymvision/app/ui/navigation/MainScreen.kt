@@ -2,9 +2,12 @@ package com.gymvision.app.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -20,16 +23,21 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.gymvision.app.ui.achievements.AchievementsScreen
 import com.gymvision.app.ui.profile.ProfileScreen
 import com.gymvision.app.ui.progress.ProgressScreen
 import com.gymvision.app.ui.sessions.SessionListScreen
+import com.gymvision.app.ui.videotest.VideoTestScreen
+import com.gymvision.app.ui.workoutplan.WorkoutPlanScreen
 
 private data class BottomNavItem(val route: String, val label: String, val icon: ImageVector)
 
 private val bottomNavItems = listOf(
-    BottomNavItem(Routes.SESSIONS, "Sessões", Icons.Filled.FitnessCenter),
-    BottomNavItem(Routes.PROGRESS, "Progresso", Icons.Filled.TrendingUp),
-    BottomNavItem(Routes.PROFILE, "Perfil", Icons.Filled.Person),
+    BottomNavItem(Routes.SESSIONS,      "Sessões",    Icons.Filled.FitnessCenter),
+    BottomNavItem(Routes.WORKOUT_PLAN,  "Treino",     Icons.Filled.CalendarMonth),
+    BottomNavItem(Routes.PROGRESS,      "Progresso",  Icons.Filled.TrendingUp),
+    BottomNavItem(Routes.ACHIEVEMENTS,  "Conquistas", Icons.Filled.EmojiEvents),
+    BottomNavItem(Routes.PROFILE,       "Perfil",     Icons.Filled.Person),
 )
 
 @Composable
@@ -70,7 +78,7 @@ fun MainScreen(rootNavController: NavHostController) {
                 SessionListScreen(
                     onOpenCamera = { sessionId, exerciseType, studentId, academyId ->
                         rootNavController.navigate(
-                            Routes.camera(sessionId, exerciseType, studentId, academyId)
+                            Routes.cameraGuide(sessionId, exerciseType, studentId, academyId)
                         )
                     },
                     onOpenSessionDetail = { sessionId ->
@@ -78,7 +86,17 @@ fun MainScreen(rootNavController: NavHostController) {
                     },
                 )
             }
-            composable(Routes.PROGRESS) { ProgressScreen() }
+            composable(Routes.WORKOUT_PLAN) {
+                WorkoutPlanScreen(
+                    onNavigateToCamera = { sessionId, exerciseType, studentId, academyId ->
+                        rootNavController.navigate(
+                            Routes.cameraGuide(sessionId, exerciseType, studentId, academyId)
+                        )
+                    }
+                )
+            }
+            composable(Routes.PROGRESS)      { ProgressScreen() }
+            composable(Routes.ACHIEVEMENTS)  { AchievementsScreen() }
             composable(Routes.PROFILE) {
                 ProfileScreen(
                     onLoggedOut = {
@@ -88,6 +106,7 @@ fun MainScreen(rootNavController: NavHostController) {
                     }
                 )
             }
+            composable(Routes.VIDEO_TEST)   { VideoTestScreen() }
         }
     }
 }
