@@ -434,3 +434,21 @@ Usuário relatou, na mesma sessão: "o maior erro e no display do video os landm
 Commit: `960d306`.
 
 ---
+
+### CI/CD: publicação das imagens também no Docker Hub
+
+Usuário pediu para "criar um pipeline de ci/cd e publicar no docker hub os containers". Já existia `.github/workflows/ci.yml` com testes + build + push para `ghcr.io`, mas achei dois problemas reais antes de adicionar Docker Hub:
+1. O trigger (`on.push.branches`) só incluía `main`/`develop`, e o job `build-and-push` só rodava com `if: github.ref == 'refs/heads/main'` — mas o branch real deste repo é `master`. A pipeline nunca tinha disparado de fato em um push.
+2. `notification-service` tem `Dockerfile` mas não estava na lista de imagens publicadas (só user/pose/session/analytics/backup-service).
+
+**Fix em `.github/workflows/ci.yml`**:
+- Trigger e condição do `build-and-push` agora aceitam `master` também (mantido `main`/`develop` por segurança).
+- Novo step "Log in to Docker Hub" (`docker/login-action`) usando secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (usuário acordado: `souzza-matheus`).
+- Cada step de build-and-push agora lista duas tags (ghcr.io e docker.io/souzza-matheus/gymvision-`<serviço>`).
+- Adicionado step para `notification-service` (faltava). Build local validado (`docker build ./notification-service`) antes de comitar.
+
+**Pendência do usuário (não posso fazer por aqui)**: criar um Access Token no Docker Hub (Account Settings → Security → New Access Token) e cadastrar dois secrets no repositório GitHub (`Settings → Secrets and variables → Actions`): `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. Sem isso o job `build-and-push` falha no login.
+
+Commit: `83badc7`.
+
+---
