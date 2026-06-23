@@ -93,6 +93,11 @@ BENCH_WRIST_DEVIATION_MAX: float   = 0.04   # desvio lateral do pulso em relaç�
 ROW_BACK_ANGLE_MAX: float          = 35.0   # lombar não pode ultrapassar 35° de curvatura
 ROW_ELBOW_RANGE_MIN: float         = 120.0  # cotovelo deve chegar a pelo menos 120° (trás)
 
+# Exercícios cuja fase/avaliação depende do ângulo do joelho (SQUAT/DEADLIFT/LUNGE).
+# BENCH_PRESS/BENT_OVER_ROW são avaliados pelo cotovelo — pernas fora de quadro
+# (comum nesses exercícios) não devem zerar o score.
+_KNEE_DEPENDENT_EXERCISES = {ExerciseType.SQUAT, ExerciseType.DEADLIFT, ExerciseType.LUNGE}
+
 # Thresholds de orientação para desabilitar regras perspectiva-dependentes
 # (frontal_weight abaixo deste valor → câmera lateral → disable knee cave)
 _FRONTAL_WEIGHT_FOR_KNEE_CAVE      = 0.40   # mínimo fw para confiar no knee cave
@@ -509,17 +514,26 @@ def _analyze_bent_over_row(
 
 # ── Score ─────────────────────────────────────────────────────────────────────
 
-def calculate_score(errors: list[DetectedError], phase: MovementPhase) -> float:
+def calculate_score(
+    errors: list[DetectedError],
+    phase: MovementPhase,
+    force_assessable: bool = False,
+) -> float:
     """
-    Porta de ExerciseAnalyzer.calculateScore(). Inalterado.
+    Porta de ExerciseAnalyzer.calculateScore().
 
     Score base 100. Penalidades:
       HIGH error   → -25 pts
       MEDIUM error → -15 pts
       LOW error    → -5 pts
     Score mínimo: 0.
+
+    `force_assessable=True` ignora o zeramento por phase==UNKNOWN — usado por
+    exercícios cuja fase é derivada do joelho (ver _KNEE_DEPENDENT_EXERCISES)
+    mas cuja avaliação real depende de outra articulação (ex.: cotovelo no
+    BENCH_PRESS/BENT_OVER_ROW, onde pernas fora de quadro são comuns).
     """
-    if phase == MovementPhase.UNKNOWN:
+    if phase == MovementPhase.UNKNOWN and not force_assessable:
         return 0.0
 
     score = 100.0
@@ -630,7 +644,11 @@ class ExerciseAnalyzer:
         else:
             errors = []
 
-        score = calculate_score(errors, phase)
+        force_assessable = (
+            request.exercise_type not in _KNEE_DEPENDENT_EXERCISES
+            and (lm_map.get(LEFT_ELBOW) is not None or lm_map.get(RIGHT_ELBOW) is not None)
+        )
+        score = calculate_score(errors, phase, force_assessable)
 
         has_alert = any(
             e.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH) for e in errors

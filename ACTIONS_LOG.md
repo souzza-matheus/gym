@@ -385,3 +385,17 @@ Usuário testou o motor de IA (`ai_exercise_analyzer.py`/`ai_exercise_classifier
 - **Validado**: `pytest tests/ --ignore=tests/test_pose_service.py` → 48/48 passando; `docker compose up -d --build pose-service && docker compose up -d --force-recreate pose-service` → container `gymvision-pose-svc` `healthy`, confirmado via `docker exec` que `main.py`/`video_analyzer.py` agora importam de `exercise_analyzer`/`exercise_classifier` (não dos módulos `ai_*`); `GET /api/v1/pose/health` → `200 OK`; cache Redis do vídeo de teste limpo (`FLUSHALL`) para evitar relatórios cacheados da era IA.
 
 ---
+
+### Correção do score zerado em BENCH_PRESS/BENT_OVER_ROW no motor de regras (regressão da reversão acima)
+
+Usuário relatou, após restaurar a feature "Testar Vídeo": "overlay no teste esta todo quebrado nao esta identificando corretamente e as mensagens de erro tambem estao ruins".
+
+**Causa raiz**: investigado rodando `analyze-video` direto contra o pose-service (porta 8083) com os vídeos de exemplo embutidos no APK. `bench_press.mp4` voltou a dar `avg_score=0.0` em 100% dos frames — exatamente o bug "score zerado em BENCH_PRESS quando pernas fora de quadro" já corrigido em `ai_exercise_analyzer.py` na entrada de 2026-06-18 acima. O motor de regras (`exercise_analyzer.py`) nunca recebeu o fix equivalente: `_analyze_bench_press`/`_analyze_bent_over_row` foram adicionados ao motor de regras no mesmo commit que introduziu a IA (`574dbfd`), mas `detect_phase()`/`calculate_score()` continuaram com a lógica original (`Inalterado`) de zerar o score sempre que `phase == UNKNOWN` — fase essa derivada só do ângulo do joelho, irrelevante para supino/remada onde as pernas comumente saem de quadro. Ao reverter de volta para o motor de regras, o bug reapareceu porque ele nunca existiu lá para começar.
+
+**Fix**: `pose-service/exercise_analyzer.py`:
+- Novo `_KNEE_DEPENDENT_EXERCISES = {SQUAT, DEADLIFT, LUNGE}`.
+- `calculate_score(errors, phase, force_assessable=False)`: novo parâmetro opcional (default preserva 100% o comportamento anterior — `calculate_score(errors, MovementPhase.UNKNOWN) == 0.0` continua valendo, testado em `test_exercise_analyzer.py`); quando `force_assessable=True`, ignora o zeramento por `phase==UNKNOWN`.
+- `ExerciseAnalyzer.analyze()`: passa `force_assessable=True` quando o exercício não é joelho-dependente e há pelo menos um cotovelo (`LEFT_ELBOW`/`RIGHT_ELBOW`) detectado nos landmarks.
+- **Validado**: `analyze-video` com os 7 vídeos de exemplo do APK — `bench_press.mp4` (BENCH_PRESS) `avg_score` 0.0 → 71.1 (mantendo os erros corretos: ELBOW_FLARE, WRIST_BENT); `bent_over_row.mp4` melhorou 76.0 → 79.5 (mesmo bug, frames com perna fora de quadro). SQUAT/DEADLIFT/LUNGE inalterados (100.0/99.5/92.8). `pytest tests/ --ignore=tests/test_pose_service.py` → 48/48 passando. Container `gymvision-pose-svc` reconstruído e recriado, `GET /api/v1/pose/health` → `200 OK`, cache Redis limpo (`FLUSHALL`).
+
+---
