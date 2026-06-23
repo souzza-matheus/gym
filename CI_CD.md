@@ -2,6 +2,8 @@
 
 Pipeline definida em [`.github/workflows/ci.yml`](.github/workflows/ci.yml), executada pelo GitHub Actions.
 
+> Versão com diagramas (Mermaid): [`CI_CD_VISUAL.md`](CI_CD_VISUAL.md).
+
 ## Quando dispara
 
 - **Push** em `main`, `master` ou `develop`.
