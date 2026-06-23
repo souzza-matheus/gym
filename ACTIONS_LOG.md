@@ -399,3 +399,38 @@ Usuário relatou, após restaurar a feature "Testar Vídeo": "overlay no teste e
 - **Validado**: `analyze-video` com os 7 vídeos de exemplo do APK — `bench_press.mp4` (BENCH_PRESS) `avg_score` 0.0 → 71.1 (mantendo os erros corretos: ELBOW_FLARE, WRIST_BENT); `bent_over_row.mp4` melhorou 76.0 → 79.5 (mesmo bug, frames com perna fora de quadro). SQUAT/DEADLIFT/LUNGE inalterados (100.0/99.5/92.8). `pytest tests/ --ignore=tests/test_pose_service.py` → 48/48 passando. Container `gymvision-pose-svc` reconstruído e recriado, `GET /api/v1/pose/health` → `200 OK`, cache Redis limpo (`FLUSHALL`).
 
 ---
+
+## 2026-06-23
+
+### Correção do threshold de KNEE_CAVE no SQUAT (causa raiz real do "overlay quebrado", não regressão da IA)
+
+Usuário relatou de novo que o overlay do teste de vídeo está quebrado, não identifica corretamente e pediu para "voltar ao que estava antes de começar a IA". Antes de reverter literalmente, validei contra o vídeo real `/home/souzza-matheus/Downloads/Bad squat form!!! It needs help!! #shorts.mp4`: `avg_score=100.0`, zero erros — mesmo com o motor de regras já restaurado (pós `51b7aa8`+`0ff7a85`).
+
+**Investigação**: comparei `exercise_analyzer.py`/`angle_calculator.py`/`orientation_detector.py` entre o commit pré-IA (`6ce352e`) e o commit que introduziu a IA (`574dbfd`) — a lógica de orientação multi-câmera já existia antes da IA, então um revertão literal não mudaria nada para SQUAT. Rodei um script de diagnóstico frame-a-frame dentro do container `gymvision-pose-svc` usando o pipeline de produção real (`tf_serving_client` → `orientation_detector` → `angle_calculator` → `exercise_analyzer`, sem reimplementar nada): profundidade boa (joelho 79-86° no fundo, threshold é >90°), tronco ereto (back_angle <17°), knee-over-toe desabilitado por câmera FRONTAL/ANGLED (`frontal_weight` 0.55-0.86 na maioria dos frames — esse check só vale em câmera lateral). Achado colateral (não corrigido, fora de escopo): a coordenada Z do MoveNet/TF-Serving é sempre hardcoded para `0.0` (`tf_serving_client.py:195`) — a melhoria de back_angle "sagital via Z" adicionada na era da IA (`_frontal_back_angle_combined`) é código morto em produção, nunca fez diferença.
+
+O joelho direito mostrava desvio consistente de ~1.8-3.3% durante as fases reais do movimento (DESCENDING/BOTTOM/ASCENDING), zerado/negativo durante STANDING — sinal real de valgo, não ruído — mas o `SQUAT_KNEE_CAVE_THRESHOLD` (4.0, já reduzido do original 15.0 durante a era da IA) nunca era cruzado. Perguntei ao usuário o que via de errado no vídeo: confirmou joelho colapsando para dentro — exatamente esse sinal.
+
+**Fix**: `pose-service/exercise_analyzer.py` — `SQUAT_KNEE_CAVE_THRESHOLD` 4.0 → 2.0. Também commitado junto: `pose-service/tf_serving_client.py` `MIN_CONFIDENCE` 0.5 → 0.15 (trabalho de uma sessão anterior não commitado — 0.5 citava o `PoseDetectorProcessor.kt` on-device que não existe mais após a reescrita em Compose; em filmagem real com joelho parcialmente ocluído a confiança fica entre 0.3-0.6, e 0.5 fazia o landmark oscilar detectado/UNKNOWN sem motivo real).
+
+**Validado**: `pytest tests/ --ignore=tests/test_pose_service.py` → 48/48 passando (fixtures de knee cave existentes usavam desvios ≥5%, não afetadas pelo novo threshold). Container reconstruído/recriado, `GET /api/v1/pose/health` → 200, cache Redis limpo (`FLUSHALL`). Vídeo "Bad squat form" agora retorna `avg_score=95.4` (min 70.0) com `KNEE_CAVE_RIGHT` em 29.4% dos frames. `squat.mp4` (vídeo de boa forma, já usado nas validações anteriores) permanece com apenas 1 frame isolado de `KNEE_CAVE_RIGHT` (1.8%) — sem falso positivo sistemático.
+
+**Pendência não resolvida nesta sessão**: `pose-service/ai/dataset_generator.py` tem uma mudança não commitada (imports não usados de thresholds de LUNGE/ROW, provavelmente início de uma extensão da IA desconectada) — deixada como está, sem decisão do usuário sobre descartar ou retomar.
+
+Commit: `023fb55`.
+
+---
+
+### Correção do overlay de landmarks não aparecendo no "Testar Vídeo" (Android)
+
+Usuário relatou, na mesma sessão: "o maior erro e no display do video os landmarks nao aparecem".
+
+**Causa raiz**: `android-app/.../ui/videotest/VideoTestScreen.kt` usa `android.widget.VideoView`, que preserva o aspect ratio do vídeo (letterbox) dentro do `Box` que o contém, em vez de esticar para preenchê-lo. `PoseOverlay` (compartilhado com `CameraScreen.kt`) desenhava os landmarks normalizados (0-1, relativos ao frame original do vídeo) usando o tamanho cheio do `Canvas` (`size.width`/`size.height`), assumindo que o Canvas cobre exatamente a área visível do conteúdo — verdade em `CameraScreen` (cuja `PreviewView` usa `FILL_CENTER`, sem letterbox), falso em `VideoTestScreen` sempre que o aspect ratio do vídeo difere do da tela (caso comum nos 8 vídeos de exemplo embutidos). Resultado: o esqueleto era desenhado fora do retângulo real do vídeo, na faixa de letterbox — efetivamente invisível sobre a pessoa.
+
+**Fix**:
+- `android-app/.../ui/camera/PoseOverlay.kt`: novos parâmetros opcionais `contentOffset: Offset = Offset.Zero` e `contentSize: Size? = null` — quando não informados, comportamento idêntico ao anterior (usa o tamanho cheio do Canvas, preservando `CameraScreen` inalterado).
+- `android-app/.../ui/videotest/VideoTestScreen.kt` (`PlaybackUI`): rastreia o tamanho medido do container (`Modifier.onSizeChanged`) e as dimensões intrínsecas do vídeo (`mp.videoWidth`/`videoHeight` em `setOnPreparedListener`); calcula o retângulo real de letterbox (`scale = min(containerW/videoW, containerH/videoH)`, centralizado) e passa `contentOffset`/`contentSize` para `PoseOverlay`.
+- **Validado**: `./gradlew :app:compileDebugKotlin` e `:app:assembleDebug` passam sem erros.
+
+Commit: `960d306`.
+
+---
