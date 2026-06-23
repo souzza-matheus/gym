@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import com.gymvision.app.model.Landmark
 
@@ -22,15 +23,31 @@ private val SKELETON_CONNECTIONS = listOf(
 private const val MIN_VISIBILITY = 0.4f
 private val ConnectionColor = Color(0xFF00D4AA)
 
+/**
+ * Desenha o esqueleto sobre [modifier]. Por padrão assume que o Canvas cobre
+ * exatamente a área de conteúdo visível (caso de CameraScreen, cuja PreviewView
+ * usa FILL_CENTER). Quando o conteúdo é desenhado em letterbox dentro de um
+ * container maior (ex.: VideoView preservando aspect ratio em VideoTestScreen),
+ * passe [contentOffset]/[contentSize] com o retângulo real ocupado pelo vídeo —
+ * caso contrário os landmarks (normalizados 0-1 em relação ao frame original)
+ * são mapeados para a área errada e aparecem deslocados/fora da tela.
+ */
 @Composable
-fun PoseOverlay(landmarks: List<Landmark>, modifier: Modifier = Modifier) {
+fun PoseOverlay(
+    landmarks: List<Landmark>,
+    modifier: Modifier = Modifier,
+    contentOffset: Offset = Offset.Zero,
+    contentSize: Size? = null,
+) {
     if (landmarks.isEmpty()) return
 
     val byType = remember(landmarks) { landmarks.associateBy { it.landmarkType } }
 
     Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
+        val w = contentSize?.width ?: size.width
+        val h = contentSize?.height ?: size.height
+        val offX = contentOffset.x
+        val offY = contentOffset.y
 
         SKELETON_CONNECTIONS.forEach { (startIdx, endIdx) ->
             val start = byType[startIdx]
@@ -40,8 +57,8 @@ fun PoseOverlay(landmarks: List<Landmark>, modifier: Modifier = Modifier) {
             ) {
                 drawLine(
                     color = ConnectionColor,
-                    start = Offset(start.x * w, start.y * h),
-                    end = Offset(end.x * w, end.y * h),
+                    start = Offset(offX + start.x * w, offY + start.y * h),
+                    end = Offset(offX + end.x * w, offY + end.y * h),
                     strokeWidth = 6f,
                 )
             }
@@ -52,7 +69,7 @@ fun PoseOverlay(landmarks: List<Landmark>, modifier: Modifier = Modifier) {
                 drawCircle(
                     color = visibilityColor(landmark.visibility),
                     radius = 8f,
-                    center = Offset(landmark.x * w, landmark.y * h),
+                    center = Offset(offX + landmark.x * w, offY + landmark.y * h),
                 )
             }
         }

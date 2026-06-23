@@ -59,10 +59,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -306,6 +310,8 @@ private fun PlaybackUI(
     var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
     var currentFrame by remember { mutableStateOf<FrameData?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var videoIntrinsicSize by remember { mutableStateOf<IntSize?>(null) }
 
     // Poll video position every 100ms to sync overlay with playback
     LaunchedEffect(videoViewRef) {
@@ -320,10 +326,36 @@ private fun PlaybackUI(
         }
     }
 
+    // VideoView preserva o aspect ratio do vídeo (letterbox) em vez de
+    // esticar para preencher o container — calcula o retângulo real onde o
+    // vídeo é desenhado para que o overlay de landmarks (normalizados em
+    // relação ao frame original) caia no lugar certo, e não na área de
+    // letterbox/full container.
+    val (contentOffset, contentSize) = remember(containerSize, videoIntrinsicSize) {
+        val vs = videoIntrinsicSize
+        if (vs == null || vs.width <= 0 || vs.height <= 0 ||
+            containerSize.width <= 0 || containerSize.height <= 0
+        ) {
+            Offset.Zero to null
+        } else {
+            val scale = minOf(
+                containerSize.width.toFloat() / vs.width,
+                containerSize.height.toFloat() / vs.height,
+            )
+            val drawW = vs.width * scale
+            val drawH = vs.height * scale
+            Offset(
+                (containerSize.width - drawW) / 2f,
+                (containerSize.height - drawH) / 2f,
+            ) to Size(drawW, drawH)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onSizeChanged { containerSize = it },
     ) {
         // Video player
         AndroidView(
@@ -333,6 +365,7 @@ private fun PlaybackUI(
                     vv.setVideoURI(videoUri)
                     vv.setOnPreparedListener { mp ->
                         mp.isLooping = false
+                        videoIntrinsicSize = IntSize(mp.videoWidth, mp.videoHeight)
                         vv.start()
                     }
                     videoViewRef = vv
@@ -340,10 +373,13 @@ private fun PlaybackUI(
             },
         )
 
-        // Skeleton overlay — same PoseOverlay used in CameraScreen
+        // Skeleton overlay — same PoseOverlay used in CameraScreen, mapeado
+        // para o retângulo real do vídeo (ver contentOffset/contentSize acima).
         PoseOverlay(
             landmarks = currentFrame?.landmarks ?: emptyList(),
             modifier = Modifier.fillMaxSize(),
+            contentOffset = contentOffset,
+            contentSize = contentSize,
         )
 
         // Score gauge + phase chip (top-left, mirroring CameraScreen layout)
