@@ -24,8 +24,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ai_exercise_analyzer import ExerciseAnalyzer
-from ai_exercise_classifier import classify_frames
+from exercise_analyzer import ExerciseAnalyzer
+from exercise_classifier import classify_frames
 from models import ExerciseType, MovementPhase, RiskLevel
 
 log = logging.getLogger(__name__)

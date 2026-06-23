@@ -38,7 +38,7 @@ import video_cache as cache
 import video_queue as vqueue
 import video_storage as storage
 from config import settings
-from ai_exercise_analyzer import ExerciseAnalyzer
+from exercise_analyzer import ExerciseAnalyzer
 from models import (
     ExerciseAnalysis, ExerciseType, HealthResponse,
     PoseAnalysisResponse, MovementPhase, JointAngles,
@@ -220,7 +220,7 @@ async def detect_exercise(
     except Exception as e:
         raise HTTPException(500, f"Erro na detecção de pose: {e}")
 
-    from ai_exercise_classifier import classify_single
+    from exercise_classifier import classify_single
     result = classify_single(landmarks)
 
     log.info("detect-exercise session=%s result=%s conf=%.2f",

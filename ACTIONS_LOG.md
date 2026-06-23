@@ -366,3 +366,22 @@ A pedido do usuário ("volte a feature de testes" + "adicione os vídeos na mem�
 - `android-app/.../ui/navigation/MainScreen.kt`: adicionado item "Testar" (`Routes.VIDEO_TEST`, `Icons.Filled.VideoLibrary`) em `bottomNavItems`.
 - `android-app/app/src/main/assets/test_videos/`: 8 vídeos reais de teste (squat×2, deadlift×2, lunge, bench_press×2, bent_over_row — os mesmos usados na validação do motor de IA, copiados de `/tmp/gymvision_test_videos/`) embutidos como assets do APK (~21MB).
 - `VideoTestViewModel.kt`: novo `SAMPLE_VIDEOS` (lista de `SampleVideo(assetName, label, exerciseType)`) e `processSampleVideo()` — copia o asset para `cacheDir` (idempotente, só copia se não existir) e gera um `content://` URI via `FileProvider` para alimentar o mesmo pipeline de `processVideo()`.
+- `VideoTestScreen.kt`: seção "Ou use um vídeo de exemplo" na tela inicial, com um card por vídeo; lista `EXERCISES` expandida de `[SQUAT, DEADLIFT, LUNGE]` para incluir também `BENCH_PRESS`/`BENT_OVER_ROW`.
+- Novo `FileProvider` registrado em `AndroidManifest.xml` (`${applicationId}.fileprovider`) + `res/xml/file_paths.xml` (`cache-path`), necessário para gerar URIs de conteúdo seguros a partir dos arquivos copiados para o cache.
+- **Validado**: `./gradlew :app:compileDebugKotlin` e `./gradlew :app:assembleDebug` passam sem erros; `app-debug.apk` gerado (116MB) e confirmado via `unzip -l` que os 8 vídeos estão em `assets/test_videos/` dentro do APK.
+
+---
+
+### Reversão do motor de IA para o motor de regras original — a pedido do usuário
+
+Usuário testou o motor de IA (`ai_exercise_analyzer.py`/`ai_exercise_classifier.py`) com os vídeos reais e achou os avisos de erro muito brandos comparado ao motor de regras original — decisão: não vale a complexidade adicional, reverter.
+
+**Causa raiz do problema relatado**: o dataset de treino da IA é sintético, rotulado pelo **próprio motor de regras antigo** atuando como professor (weak supervision). Um classificador estatístico treinado para imitar um conjunto de regras determinísticas tende a suavizar os casos extremos (regressão à média), especialmente na classe `HIGH` (minoritária) — por isso a IA sistematicamente subestimava a severidade em formas claramente incorretas. A IA nunca poderia superar o motor de regras nesse desenho, só na melhor das hipóteses igualá-lo.
+
+**Reversão (apenas religação de imports — nenhuma lógica nova)**:
+- `pose-service/main.py`: `from ai_exercise_analyzer import ExerciseAnalyzer` → `from exercise_analyzer import ExerciseAnalyzer`; `from ai_exercise_classifier import classify_single` → `from exercise_classifier import classify_single`.
+- `pose-service/video_analyzer.py`: mesmas trocas para `ExerciseAnalyzer` e `classify_frames`.
+- Módulos `ai_exercise_analyzer.py`, `ai_exercise_classifier.py`, `ai/` (dataset generator, modelos `.joblib`, etc.) **mantidos no disco mas desconectados** — não removidos, caso seja útil retomar com dados reais no futuro.
+- **Validado**: `pytest tests/ --ignore=tests/test_pose_service.py` → 48/48 passando; `docker compose up -d --build pose-service && docker compose up -d --force-recreate pose-service` → container `gymvision-pose-svc` `healthy`, confirmado via `docker exec` que `main.py`/`video_analyzer.py` agora importam de `exercise_analyzer`/`exercise_classifier` (não dos módulos `ai_*`); `GET /api/v1/pose/health` → `200 OK`; cache Redis do vídeo de teste limpo (`FLUSHALL`) para evitar relatórios cacheados da era IA.
+
+---
