@@ -353,3 +353,16 @@ Continuação da tarefa de 2026-06-17 (ver entrada abaixo). Trabalho realizado d
 - Botão "Relatório PDF" com ícone de download adicionado no header da página ao lado do título; desabilitado durante download (spinner SVG animado) e se não há usuário logado
 
 ---
+
+## 2026-06-22
+
+### Restaurada a feature "Testar Vídeo" no app mobile e vídeos de exemplo embutidos no APK
+
+A pedido do usuário ("volte a feature de testes" + "adicione os vídeos na memória do mobile para eu testar").
+
+**Causa raiz da feature estar inacessível**: `VideoTestScreen`/`VideoTestViewModel`/rota `Routes.VIDEO_TEST` já existiam completos desde o commit `574dbfd`, e o ícone `Icons.Filled.VideoLibrary` já estava importado em `MainScreen.kt` — mas nunca foi adicionado a `bottomNavItems`, então a tela não tinha nenhum ponto de entrada na UI (rota órfã no `NavHost`).
+
+**Correções**:
+- `android-app/.../ui/navigation/MainScreen.kt`: adicionado item "Testar" (`Routes.VIDEO_TEST`, `Icons.Filled.VideoLibrary`) em `bottomNavItems`.
+- `android-app/app/src/main/assets/test_videos/`: 8 vídeos reais de teste (squat×2, deadlift×2, lunge, bench_press×2, bent_over_row — os mesmos usados na validação do motor de IA, copiados de `/tmp/gymvision_test_videos/`) embutidos como assets do APK (~21MB).
+- `VideoTestViewModel.kt`: novo `SAMPLE_VIDEOS` (lista de `SampleVideo(assetName, label, exerciseType)`) e `processSampleVideo()` — copia o asset para `cacheDir` (idempotente, só copia se não existir) e gera um `content://` URI via `FileProvider` para alimentar o mesmo pipeline de `processVideo()`.

@@ -79,7 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
-private val EXERCISES = listOf("SQUAT", "DEADLIFT", "LUNGE")
+private val EXERCISES = listOf("SQUAT", "DEADLIFT", "LUNGE", "BENCH_PRESS", "BENT_OVER_ROW")
 
 @Composable
 fun VideoTestScreen(viewModel: VideoTestViewModel = viewModel()) {
@@ -105,6 +105,7 @@ fun VideoTestScreen(viewModel: VideoTestViewModel = viewModel()) {
             exerciseType = exerciseType,
             onExerciseChange = { exerciseType = it },
             onPickVideo = { videoPickerLauncher.launch(arrayOf("video/*")) },
+            onPickSample = { sample -> viewModel.processSampleVideo(sample, context) },
         )
 
         is VideoTestState.Processing -> ProcessingUI(progress = s.progress, total = s.total)
@@ -128,6 +129,7 @@ private fun SetupUI(
     exerciseType: String,
     onExerciseChange: (String) -> Unit,
     onPickVideo: () -> Unit,
+    onPickSample: (SampleVideo) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -218,6 +220,36 @@ private fun SetupUI(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+
+            Spacer(Modifier.height(32.dp))
+
+            Text(
+                text = "Ou use um vídeo de exemplo",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            SAMPLE_VIDEOS.forEach { sample ->
+                ElevatedCard(
+                    onClick = { onPickSample(sample) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.VideoLibrary, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text(text = sample.label, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
         }
     }
 }

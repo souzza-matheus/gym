@@ -37,6 +37,7 @@ private val bottomNavItems = listOf(
     BottomNavItem(Routes.WORKOUT_PLAN,  "Treino",     Icons.Filled.CalendarMonth),
     BottomNavItem(Routes.PROGRESS,      "Progresso",  Icons.Filled.TrendingUp),
     BottomNavItem(Routes.ACHIEVEMENTS,  "Conquistas", Icons.Filled.EmojiEvents),
+    BottomNavItem(Routes.VIDEO_TEST,    "Testar",     Icons.Filled.VideoLibrary),
     BottomNavItem(Routes.PROFILE,       "Perfil",     Icons.Filled.Person),
 )
 

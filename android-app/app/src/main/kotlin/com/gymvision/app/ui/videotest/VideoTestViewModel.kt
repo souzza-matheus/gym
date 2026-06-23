@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gymvision.app.api.ApiClient
@@ -17,6 +18,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 data class FrameData(
     val timestampMs: Long,
@@ -34,10 +36,42 @@ sealed class VideoTestState {
     data class Error(val message: String) : VideoTestState()
 }
 
+data class SampleVideo(val assetName: String, val label: String, val exerciseType: String)
+
+val SAMPLE_VIDEOS = listOf(
+    SampleVideo("squat2.mp4", "Agachamento", "SQUAT"),
+    SampleVideo("deadlift.mp4", "Levantamento Terra (1)", "DEADLIFT"),
+    SampleVideo("deadlift2.mp4", "Levantamento Terra (2)", "DEADLIFT"),
+    SampleVideo("lunge.mp4", "Avanço", "LUNGE"),
+    SampleVideo("bench_press.mp4", "Supino (1)", "BENCH_PRESS"),
+    SampleVideo("bench_press2.mp4", "Supino (2)", "BENCH_PRESS"),
+    SampleVideo("bent_over_row.mp4", "Remada Curvada", "BENT_OVER_ROW"),
+)
+
 class VideoTestViewModel : ViewModel() {
 
     private val _state = MutableStateFlow<VideoTestState>(VideoTestState.Idle)
     val state: StateFlow<VideoTestState> = _state
+
+    fun processSampleVideo(sample: SampleVideo, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val outFile = File(context.cacheDir, "sample_${sample.assetName}")
+                if (!outFile.exists()) {
+                    context.assets.open("test_videos/${sample.assetName}").use { input ->
+                        outFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                FileProvider.getUriForFile(
+                    context, "${context.packageName}.fileprovider", outFile,
+                )
+            }.onSuccess { uri ->
+                processVideo(uri, context, sample.exerciseType)
+            }.onFailure { e ->
+                _state.value = VideoTestState.Error(e.message ?: "Erro ao carregar vídeo de exemplo.")
+            }
+        }
+    }
 
     fun processVideo(uri: Uri, context: Context, exerciseType: String) {
         viewModelScope.launch(Dispatchers.IO) {
