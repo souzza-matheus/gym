@@ -2,13 +2,14 @@ name: GymVision CI/CD
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/gymvision
+  DOCKERHUB_IMAGE_PREFIX: souzza-matheus/gymvision
 
 jobs:
 
@@ -195,17 +196,23 @@ jobs:
     name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [user-service-test, pose-service-test, session-service-build, dashboard-build, android-build]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -215,7 +222,9 @@ jobs:
         with:
           context: ./user-service
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/user-service:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/user-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-user-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -224,7 +233,9 @@ jobs:
         with:
           context: ./pose-service
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/pose-service:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/pose-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-pose-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -233,7 +244,9 @@ jobs:
         with:
           context: ./session-service
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/session-service:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/session-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-session-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -242,7 +255,9 @@ jobs:
         with:
           context: ./analytics-service
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/analytics-service:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/analytics-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-analytics-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -251,7 +266,20 @@ jobs:
         with:
           context: ./backup-service
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backup-service:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backup-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-backup-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push notification-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./notification-service
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/notification-service:latest
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-notification-service:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
