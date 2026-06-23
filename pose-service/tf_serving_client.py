@@ -53,7 +53,7 @@ MOVENET_TO_MLKIT: dict[int, LandmarkType] = {
     16: LandmarkType.RIGHT_ANKLE,
 }
 
-MIN_CONFIDENCE: float = 0.5
+MIN_CONFIDENCE: float = 0.15
 MOVENET_INPUT_SIZE: int = 256
 
 
@@ -164,7 +164,13 @@ class TFServingClient:
     ) -> list[Landmark]:
         """
         Converte 17 keypoints MoveNet para lista de Landmark.
-        Filtra por MIN_CONFIDENCE (0.5 — espelha PoseDetectorProcessor.kt).
+        Filtra por MIN_CONFIDENCE (0.15 — valor original; 0.5 chegou a ser usado
+        durante a era da IA citando o PoseDetectorProcessor.kt on-device, mas esse
+        arquivo não existe mais após a reescrita em Compose. Em vídeo real
+        (ex.: squat com joelho parcialmente ocluído por rack/Smith machine), a
+        confiança do joelho fica tipicamente entre 0.3–0.6 — com 0.5 o landmark
+        passa a aparecer/desaparecer frame a frame, fazendo phase/score
+        oscilarem entre um valor real e UNKNOWN/0 sem motivo real).
         Quando pad_info é fornecido, corrige coordenadas removendo letterbox offset.
         """
         landmarks: list[Landmark] = []

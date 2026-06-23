@@ -71,7 +71,7 @@ from angle_calculator import (
 # ── Thresholds (defaults do app Android) ─────────────────────────────────────
 # Squat
 SQUAT_DEPTH_ANGLE_MIN: float    = 90.0
-SQUAT_KNEE_CAVE_THRESHOLD: float = 4.0
+SQUAT_KNEE_CAVE_THRESHOLD: float = 2.0
 SQUAT_BACK_ANGLE_MAX: float     = 45.0
 SQUAT_KNEE_OVER_TOE_MAX: float  = 0.05
 
