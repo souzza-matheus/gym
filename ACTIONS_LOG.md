@@ -556,3 +556,13 @@ Usuário reportou que, após a correção anterior, só sobrou 1 erro no Actions
 **Pendência (não é bug de CI, é lacuna de produto)**: `user-service` não tem testes de unidade — `find src -type d` não mostra `src/test`. Considerar escrever testes se cobertura real for relevante.
 
 ---
+
+### Login no Docker Hub falhava com "Username required" mesmo com o secret cadastrado
+
+CI passou a falhar no step "Log in to Docker Hub" do job `build-and-push` com `Error: Username required`. Sem `gh` CLI disponível, diagnosticado adicionando um step temporário que imprimia só o **tamanho** de `secrets.DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (nunca o valor, que o Actions mascara). Resultado: `DOCKERHUB_USERNAME` tinha 0 caracteres (token tinha 36, correto) — o secret existia com o nome certo em Repository secrets, mas o valor ficou vazio ao salvar. Usuário atualizou o valor e confirmou, mas o erro persistiu numa nova run; reativei o debug step pra confirmar de novo, mas o usuário decidiu não investigar mais o secret e pediu pra hardcodar o username direto no workflow.
+
+**Fix**: `.github/workflows/ci.yml`, step "Log in to Docker Hub" — `username: ${{ secrets.DOCKERHUB_USERNAME }}` → `username: souzzamatheus` (hardcoded). `password` continua vindo de `secrets.DOCKERHUB_TOKEN` (esse nunca teve problema). Username do Docker Hub não é informação sensível (já aparece em texto puro nas tags publicadas via `DOCKERHUB_IMAGE_PREFIX`), então não há motivo de segurança para mantê-lo como secret.
+
+**Pendência**: causa raiz de por que o valor do secret ficava vazio mesmo após o usuário "salvar" duas vezes não foi identificada (sem acesso à API/UI do GitHub para investigar mais a fundo nesta sessão) — se o problema se repetir com outro secret no futuro, vale revisar se há algum comportamento estranho na conta/organização do GitHub ao editar secrets.
+
+---
