@@ -566,3 +566,11 @@ CI passou a falhar no step "Log in to Docker Hub" do job `build-and-push` com `E
 **Pendência**: causa raiz de por que o valor do secret ficava vazio mesmo após o usuário "salvar" duas vezes não foi identificada (sem acesso à API/UI do GitHub para investigar mais a fundo nesta sessão) — se o problema se repetir com outro secret no futuro, vale revisar se há algum comportamento estranho na conta/organização do GitHub ao editar secrets.
 
 ---
+
+### `deploy-staging` passa a pular graciosamente sem servidor configurado
+
+Job `deploy-staging` falhava com `Error: missing server host` (`appleboy/ssh-action`) — não existe servidor de staging real ainda, e os secrets `STAGING_HOST`/`STAGING_USER`/`STAGING_SSH_KEY` nunca foram cadastrados (pendência já identificada em sessão anterior, nunca resolvida). Perguntei ao usuário como tratar: remover o job, deixar falhando, ou pular graciosamente até existir servidor — escolhida a opção de pular.
+
+**Fix**: adicionado `if: ${{ secrets.STAGING_HOST != '' }}` no job `deploy-staging` em `.github/workflows/ci.yml`. Sem o secret configurado, o job aparece como "Skipped" no Actions em vez de falhar. Quando o usuário tiver um servidor real, basta cadastrar os 3 secrets (no Environment "staging", já referenciado pelo job) que o deploy volta a rodar automaticamente, sem precisar tocar no workflow de novo.
+
+---
