@@ -24,11 +24,9 @@ from typing import Optional
 import aio_pika
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from bson import ObjectId
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -146,7 +144,7 @@ async def persist_session_summary(data: dict):
         "avg_score":     data.get("avg_score", 0),
         "total_reps":    data.get("total_reps", 0),
         "alert_count":   data.get("alert_count", 0),
-        "dominant_error":data.get("dominant_error"),
+        "dominant_error": data.get("dominant_error"),
         "duration_ms":   data.get("duration_ms", 0),
         "started_at":    data.get("started_at"),
         "ended_at":      data.get("ended_at"),
@@ -269,7 +267,6 @@ async def student_analytics(
 ):
     """Evolução do aluno: score semanal, erros dominantes e progresso."""
     # Progresso semanal
-    cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
     progress_cursor = db.student_progress.find(
         {"student_id": student_id},
         {"_id": 0}
@@ -403,7 +400,7 @@ async def academy_leaderboard(
             "_id":       "$student_id",
             "avg_score": {"$avg": "$avg_score"},
             "sessions":  {"$sum": 1},
-            "total_reps":{"$sum": "$total_reps"},
+            "total_reps": {"$sum": "$total_reps"},
         }},
         {"$sort": {"avg_score": -1}},
         {"$limit": limit},
@@ -556,7 +553,7 @@ def _build_pdf(student_id: str, month_label: str, sessions: list,
     gv_dark  = colors.HexColor("#111827")
     gv_gray  = colors.HexColor("#6b7280")
     gv_light = colors.HexColor("#f9fafb")
-    gv_border= colors.HexColor("#e5e7eb")
+    gv_border = colors.HexColor("#e5e7eb")
 
     title_style = ParagraphStyle(
         "GVTitle", parent=styles["Title"],
@@ -608,7 +605,7 @@ def _build_pdf(student_id: str, month_label: str, sessions: list,
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [gv_light]),
         ("GRID",         (0, 0), (-1, -1), 0.5, gv_border),
         ("TOPPADDING",   (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
     story.append(stats_tbl)
 
@@ -648,7 +645,7 @@ def _build_pdf(student_id: str, month_label: str, sessions: list,
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [gv_light, colors.white]),
             ("GRID",         (0, 0), (-1, -1), 0.5, gv_border),
             ("TOPPADDING",   (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(sess_tbl)
 
@@ -672,7 +669,7 @@ def _build_pdf(student_id: str, month_label: str, sessions: list,
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#fffbeb"), colors.white]),
             ("GRID",         (0, 0), (-1, -1), 0.5, gv_border),
             ("TOPPADDING",   (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(err_tbl)
 

@@ -129,7 +129,7 @@ jobs:
 
       - name: Lint
         working-directory: analytics-service
-        run: flake8 src/main.py --max-line-length=120 --ignore=E501,W503
+        run: flake8 src/main.py --max-line-length=120 --ignore=E501,W503,E221,E241
 
   # ── Dashboard (React/Vite) ────────────────────────────────────────────────────
   dashboard-build:

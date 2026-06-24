@@ -3,7 +3,7 @@ tests/test_pose_service.py
 
 Testes unitários e de integração do Pose Service.
 Espelham os thresholds e lógica do app Android:
-  - MIN_CONFIDENCE = 0.5
+  - MIN_CONFIDENCE = 0.15
   - Resolução 480x640
   - Mesmos landmark types do ML Kit
 """
@@ -57,6 +57,7 @@ class TestAnalyzeEndpoint:
         r = client.post(
             "/api/v1/pose/analyze",
             files={"frame": ("frame.txt", b"not an image", "text/plain")},
+            data={"exercise_type": "SQUAT"},
         )
         assert r.status_code == 415
 
@@ -66,6 +67,7 @@ class TestAnalyzeEndpoint:
             r = client.post(
                 "/api/v1/pose/analyze",
                 files={"frame": ("frame.jpg", frame_bytes, "image/jpeg")},
+                data={"exercise_type": "SQUAT"},
             )
         assert r.status_code == 200
         body = r.json()
@@ -83,6 +85,7 @@ class TestAnalyzeEndpoint:
             r = client.post(
                 "/api/v1/pose/analyze",
                 files={"frame": ("f.jpg", make_blank_frame(), "image/jpeg")},
+                data={"exercise_type": "SQUAT"},
             )
         assert r.json()["landmark_count"] == 2
 
@@ -91,6 +94,7 @@ class TestAnalyzeEndpoint:
         r = client.post(
             "/api/v1/pose/analyze",
             files={"frame": ("big.jpg", huge, "image/jpeg")},
+            data={"exercise_type": "SQUAT"},
         )
         assert r.status_code == 413
 
@@ -98,18 +102,23 @@ class TestAnalyzeEndpoint:
 # ── Landmark confidence filtering ─────────────────────────────────────────────
 class TestConfidenceFilter:
     """
-    Espelha o filtro MIN_CONFIDENCE do PoseDetectorProcessor.kt:
-    landmarks com inFrameLikelihood < 0.5 são descartados.
+    Espelha o filtro MIN_CONFIDENCE de tf_serving_client.py: landmarks com
+    confiança < 0.15 são descartados. Valor baixo deliberadamente (era 0.5,
+    citando o antigo PoseDetectorProcessor.kt on-device, que não existe mais
+    após a reescrita em Compose) — em vídeo real, com joelho parcialmente
+    ocluído, a confiança fica tipicamente entre 0.3-0.6; com 0.5 o landmark
+    passava a aparecer/desaparecer frame a frame sem motivo real (ver
+    ACTIONS_LOG.md, correção do threshold de KNEE_CAVE em 2026-06-23).
     """
 
     def test_min_confidence_value(self):
-        assert MIN_CONFIDENCE == 0.5
+        assert MIN_CONFIDENCE == 0.15
 
     def test_low_confidence_landmarks_filtered(self):
         keypoints = np.zeros((17, 3))
         # Apenas joelho esquerdo com confiança alta
         keypoints[13] = [0.6, 0.4, 0.95]   # left_knee — visível
-        keypoints[14] = [0.6, 0.6, 0.2]    # right_knee — abaixo de 0.5, deve ser filtrado
+        keypoints[14] = [0.6, 0.6, 0.1]    # right_knee — abaixo de 0.15, deve ser filtrado
 
         tf = TFServingClient()
         result = tf._keypoints_to_landmarks(keypoints)
@@ -120,9 +129,9 @@ class TestConfidenceFilter:
 
     def test_all_low_confidence_returns_empty(self):
         keypoints = np.zeros((17, 3))
-        # Todos abaixo de 0.5
+        # Todos abaixo de 0.15
         for i in range(17):
-            keypoints[i] = [0.5, 0.5, 0.1]
+            keypoints[i] = [0.5, 0.5, 0.05]
 
         tf = TFServingClient()
         result = tf._keypoints_to_landmarks(keypoints)
