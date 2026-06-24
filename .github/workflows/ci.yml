@@ -197,6 +197,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [user-service-test, pose-service-test, session-service-build, dashboard-build, android-build]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
