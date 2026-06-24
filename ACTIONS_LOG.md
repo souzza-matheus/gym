@@ -573,4 +573,6 @@ Job `deploy-staging` falhava com `Error: missing server host` (`appleboy/ssh-act
 
 **Fix**: adicionado `if: ${{ secrets.STAGING_HOST != '' }}` no job `deploy-staging` em `.github/workflows/ci.yml`. Sem o secret configurado, o job aparece como "Skipped" no Actions em vez de falhar. Quando o usuário tiver um servidor real, basta cadastrar os 3 secrets (no Environment "staging", já referenciado pelo job) que o deploy volta a rodar automaticamente, sem precisar tocar no workflow de novo.
 
+**Correção (mesma sessão)**: o GitHub rejeitou o workflow na validação — `secrets` não é um contexto disponível em `if:` de **job**, só em `if:` de **step** (`Unrecognized named-value: 'secrets'`). Movida a condição do nível de job para o step "Deploy via docker compose" especificamente. Comportamento final é o mesmo (step pulado sem o secret), só mudou onde a condição é avaliada.
+
 ---
