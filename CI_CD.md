@@ -40,7 +40,7 @@ compose-validate             (independente, não bloqueia o push)
 `build-and-push` builda cada serviço com `docker/build-push-action` e publica **a mesma imagem em dois registries**:
 
 - **GitHub Container Registry**: `ghcr.io/<owner>/gymvision/<serviço>:latest`
-- **Docker Hub**: `docker.io/souzza-matheus/gymvision-<serviço>:latest`
+- **Docker Hub**: `docker.io/souzzamatheus/gymvision-<serviço>:latest`
 
 Serviços publicados: `user-service`, `pose-service`, `session-service`, `analytics-service`, `backup-service`, `notification-service`.
 

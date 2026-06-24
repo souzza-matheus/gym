@@ -66,7 +66,7 @@ flowchart LR
     end
 
     GHCR["ghcr.io/<owner>/gymvision/*<br/>(GitHub Container Registry)"]
-    DH["docker.io/souzza-matheus/gymvision-*<br/>(Docker Hub)"]
+    DH["docker.io/souzzamatheus/gymvision-*<br/>(Docker Hub)"]
 
     US & PS & SS & AS & BS & NS --> GHCR
     US & PS & SS & AS & BS & NS --> DH

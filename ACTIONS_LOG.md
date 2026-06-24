@@ -452,3 +452,81 @@ Usuário pediu para "criar um pipeline de ci/cd e publicar no docker hub os cont
 Commit: `83badc7`.
 
 ---
+
+### Correção de 4 bugs de análise biomecânica do SQUAT identificados em testes visuais (fase invertida, alarme intermitente, postura ausente, overlay incompleto)
+
+Usuário relatou 4 bugs específicos achados em testes visuais do agachamento: (1) fase Subindo/Descendo invertida, (2) alarme de "joelho colapsando" aparece e desaparece entre frames mesmo com posição parecida, (3) tronco com flexão excessiva não gera alerta (score 100/"Postura correta" mesmo errado), (4) keypoints somem do overlay mesmo com corpo visível.
+
+**Causa raiz comum aos bugs 1-3**: `ExerciseAnalyzer` (`pose-service/exercise_analyzer.py`) era totalmente sem estado entre frames — cada chamada a `.analyze()` não sabia nada do frame anterior da mesma sessão. Isso já estava documentado como bug conhecido em comentários de `tests/test_ai_exercise_engine.py`/`ai/dataset_generator.py` ("ASCENDING nunca é produzido em produção"), mas nunca tinha sido corrigido no motor de regras ativo (só comentado/contornado no motor de IA já revertido — ver entradas de 2026-06-22 acima).
+
+1. **Fase invertida**: `detect_phase()` precisa do ângulo do joelho do frame anterior pra decidir ASCENDING vs DESCENDING, mas `analyze()` nunca passava esse valor — todo frame intermediário (90°-160°) caía no ramo "sem histórico" e era sempre classificado DESCENDING, nunca ASCENDING. Fix: `ExerciseAnalyzer` agora guarda `_prev_knee_angle` por `session_id` e repassa pra `detect_phase()`.
+2. **Alarme de knee cave intermitente**: `SQUAT_KNEE_CAVE_THRESHOLD` (2.0%, já bem sensível desde a correção de 2026-06-23 acima) era comparado direto contra o valor bruto do frame, sem suavização — jitter normal de pose estimation (1-2px) cruza esse threshold pra cima e pra baixo a cada frame, piscando o alarme com a posição real do joelho estável. Fix: `_analyze_squat()` ganhou um `smoothing_state` opcional (suavização EMA usando a constante `ANGLE_SMOOTHING_ALPHA=0.3` de `angle_calculator.py`, que já existia mas nunca tinha sido usada em lugar nenhum), mantido por sessão em `ExerciseAnalyzer`, aplicado aos desvios de knee cave e knee-over-toe.
+3. **Postura do tronco ausente**: a verificação de `BACK_NOT_STRAIGHT` já era executada em qualquer fase (não era isso), mas `back_angle` depende do landmark do ombro — quando ele cai abaixo de `MIN_VISIBILITY` por 1-2 frames (comum no fundo do agachamento, ombro atrás da barra/rack), `back_angle` vira `None` e a verificação é silenciosamente pulada, dando "postura correta"/score 100 mesmo com tronco caído. Fix: novo `ExerciseAnalyzer._interpolate_missing_landmarks()` — cacheia o último landmark válido por tipo e sessão, reutiliza (com visibilidade decaindo) por até 3 frames consecutivos ausentes antes de expirar de fato (evita mascarar indefinidamente uma oclusão real/pessoa fora de quadro).
+4. **Overlay com keypoints faltando**: a lógica de desenho em `android-app/.../ui/camera/PoseOverlay.kt` já desenhava pontos individualmente e só omitia conexões com extremidade ausente (não era um bug estrutural) — mas o threshold `MIN_VISIBILITY` (0.4) descartava pontos cuja confiança caía pra 0.3-0.4 em posições agachadas/oclusão parcial, mesmo com o corpo todo visível em câmera. Fix: reduzido para 0.3.
+
+**Validado**: 8 novos testes em `tests/test_exercise_analyzer.py` cobrindo os 3 bugs do backend (fase ASCENDING/DESCENDING através de frames da mesma sessão e isolamento entre sessões; alarme de knee cave persistindo sob ruído simulado mas limpando quando a posição corrige de verdade; `BACK_NOT_STRAIGHT` sobrevivendo a 1 frame de oclusão do ombro e expirando corretamente após 6+ frames de oclusão prolongada) — `pytest tests/test_exercise_analyzer.py tests/test_ai_exercise_engine.py` → 56/56 passando; `python run_all_tests.py` (suíte legada) → 30/30 passando, sem regressão. Bug 4 (Kotlin) validado por leitura de código — sem ambiente de build Android disponível nesta sessão para compilar.
+
+**Não alterado**: `android-app/.../offline/OfflinePoseAnalyzer.kt` (modo on-device/offline, usado quando o app está sem internet) já tinha o rastreamento correto de `_prevKneeAngle` pro bug 1 (não sofria desse bug), mas tem a mesma classe de vulnerabilidade dos bugs 2 e 3 (sem suavização, sem interpolação) — não replicado lá nesta sessão por falta de ambiente de teste Kotlin; considerar se os mesmos sintomas aparecerem em modo offline.
+
+---
+
+### Ajuste de UX dos alertas de postura: remoção de métricas da mensagem + severidade em 2 níveis (Aviso/Grave)
+
+Usuário pediu para (1) remover qualquer percentual/grau de desvio do texto exibido nos alertas — esse dado deve ficar só na lógica de threshold —, (2) classificar alertas em 2 níveis visuais: Aviso (amarelo/laranja) e Grave (vermelho, fonte maior, ícone pulsante) para risco de lesão (joelho colapsando, flexão lombar excessiva, joelho passando do pé), e (3) Grave quando o desvio superar 2x o threshold mínimo OU quando o tipo de erro já é risco de lesão por definição, independente do percentual.
+
+**Modelo**: novo enum `AlertSeverity` (`WARNING`/`CRITICAL`) em `pose-service/models.py`, campo `severity` em `DetectedError` (default `WARNING`) — independente do `RiskLevel` (LOW/MEDIUM/HIGH) existente, que continua dirigindo só o cálculo de score; não foram tocados.
+
+**Backend (`pose-service/exercise_analyzer.py`)**:
+- Nova `_alert_severity(error_type, risk_level, ratio=None)`: GRAVE se o tipo de erro está em `_ALWAYS_CRITICAL_ERROR_TYPES` (KNEE_CAVE_LEFT/RIGHT, KNEE_OVER_TOE_LEFT/RIGHT, BACK_NOT_STRAIGHT, BACK_ROUNDED — risco de lesão por definição, dispara já como GRAVE mesmo no desvio mínimo); OU se `risk_level == HIGH`; OU se `ratio` (valor medido / threshold mínimo) ≥ 2.0. Caso contrário, AVISO.
+- Todas as ~13 construções de `DetectedError` nos 5 analisadores (squat/deadlift/lunge/bench/row) reescritas: descrição agora é só o motivo em linguagem simples (ex.: `"Joelho direito colapsando para dentro"`, sem `"(2.9% de desvio)"`), e `severity=_alert_severity(...)` computado com a razão medida/threshold quando disponível (`joint_angle`/`threshold_violated` continuam armazenados nos campos numéricos do `DetectedError`, só não aparecem mais na string de texto).
+- `run_all_tests.py`: stub de `models` (usado pela suíte legada standalone) atualizado com `AlertSeverity` e campo `severity` no `DetectedError` stub.
+
+**Propagação ponta a ponta do campo `severity`** (sem isso a UI receberia só `WARNING` default, perdendo a classificação):
+- `video_analyzer.py`: `AlertEvent.severity`; `RepResult.severity` (pior severidade da rep — testado que uma rep com `risk_level=MEDIUM` mas contendo um `KNEE_CAVE_LEFT` reporta `severity=CRITICAL`, já que o tipo de erro é sempre grave independente do risk_level); `critical_frames[].errors[].severity`; `professor_alerts[].severity`.
+- `messaging.py`: `severity` no payload de `gym.exercise.result` (`errors[]`) e `gym.alert.created`; `publish_alert()` ganhou parâmetro `severity`.
+- `main.py`: passa `alert.get("severity", "WARNING")` para `messaging.publish_alert()`.
+- `notification-service/src/gateway/alert.gateway.ts` (`AlertPayload`) e `alert.consumer.ts`: campo `severity` adicionado/repassado do RabbitMQ para o WebSocket.
+
+**Dashboard** (`dashboard/src/`): `useAlerts.ts`/`useVideoAnalysis.ts` — campo `severity` nos tipos `Alert`/`ProfessorAlert`/`RepReport`. `AlertCard.tsx` e `VideoReportView.tsx`: badges trocados de `RISK_BADGE` (3 cores LOW/MEDIUM/HIGH) para `SEVERITY_BADGE` (2 cores Aviso/Grave); alertas/reps GRAVE ganham `ring-2 ring-red-300`, ícone ⚠ com `animate-pulse`, e texto da descrição em `text-base font-bold text-red-700` (vs. `text-sm` normal).
+
+**Android** (`android-app/.../model/Models.kt`, `ui/components/RiskMappers.kt`, `ui/camera/CameraScreen.kt`, `ui/videotest/VideoTestScreen.kt`, `offline/OfflinePoseAnalyzer.kt`):
+- `DetectedError`/`WsAlert` ganharam campo `severity: String = "WARNING"` (no `DetectedError`, posicionado **depois** de `jointAngle` para não quebrar as ~10 construções posicionais já existentes em `OfflinePoseAnalyzer.kt`).
+- Novas `severityColor()`/`severityLabel()`/`isCriticalSeverity()` em `RiskMappers.kt`. Trocado `riskColor(error.riskLevel)` → `severityColor(error.severity)` em todos os pontos de exibição (`AlertBanner`, `ErrorsCard` em `CameraScreen.kt`; banner inline e `VideoErrorsCard` em `VideoTestScreen.kt`).
+- Texto exibido trocado de `error.description` (string livre vinda do backend) para `errorDescription(error.errorType)` — função de lookup PT-BR que **já existia no código mas nunca tinha sido usada na renderização** (achado durante a investigação); garante que a UI nunca dependa do texto bruto do backend/offline analyzer para ficar livre de métricas, mesmo que algo no futuro volte a interpolar um número ali.
+- Novo `PulsingWarningIcon` (alpha 1.0↔0.3 em loop de 600ms via `rememberInfiniteTransition`) usado só quando `isCriticalSeverity(...)` — duplicado em `CameraScreen.kt` e `VideoTestScreen.kt` (ambos já eram arquivos com composables `private`, sem um local compartilhado óbvio para promovê-lo sem reestruturar). Texto do alerta GRAVE também ganha `fontWeight = Bold` e estilo de fonte maior (`titleMedium`/`titleSmall` em vez de `bodyMedium`).
+- `OfflinePoseAnalyzer.kt`: as ~10 descrições com `${valor.toInt()}°` interpoladas removidas (mesma limpeza do backend); nova `severityFor(errorType, riskLevel)` espelhando `_alert_severity()` (sem o critério de `ratio`, já que esse analisador simplificado não carrega o threshold junto — os cortes de HIGH existentes em graus, ex. `backAngle > 63f`, já cobrem o caso de desvio extremo).
+- Banner de alerta em `VideoTestScreen.kt` agora prioriza mostrar o primeiro erro `CRITICAL` da lista antes de cair para o critério antigo (`riskLevel` HIGH/MEDIUM), para não esconder um alerta grave atrás de um aviso leve no mesmo frame.
+
+**Validado**: backend — `pytest tests/test_exercise_analyzer.py tests/test_ai_exercise_engine.py` → 67/67 passando (16 testes novos: classificação de severidade isolada, ausência de dígitos em toda descrição de todos os 5 exercícios, severidade sempre-grave para knee cave/back mesmo a 1° do threshold); `run_all_tests.py` → 30/30. Dashboard — `tsc --noEmit` manual nos 4 arquivos editados (sem `tsconfig.json` no projeto — pré-existente, não criado nesta sessão) → 0 erros novos (1 erro pré-existente não relacionado, falta de tipos do Vite `import.meta.env`). Android — `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`, sem erros novos.
+
+**Pendência não resolvida**: `OfflinePoseAnalyzer.kt`'s `severityFor()` não recebe o `ratio` (medida/threshold) que o backend usa para escalar erros não-listados (ex.: amplitude insuficiente, pulso muito dobrado) para GRAVE — no modo offline esses ficam sempre AVISO a menos que o `riskLevel` já seja HIGH. Considerar alinhar se for relevante para o app sem internet.
+
+---
+
+### Fix: app fechava sozinho (crash) ao exibir vídeo com overlay/análise — regressão do ajuste de severidade
+
+Usuário relatou crash ao testar vídeo, especificamente ao exibir o overlay com a análise (mesma sessão do ajuste de severidade acima).
+
+**Causa raiz**: `DetectedError`/`WsAlert` (`android-app/.../model/Models.kt`) ganharam `severity: String = "WARNING"` na entrada anterior, mas o app usa `Gson()` puro (sem adapter Kotlin-aware) tanto no Retrofit (`ApiClient.kt`) quanto no parsing do WebSocket (`GymWebSocketService.kt`). Gson desserializa data classes Kotlin via reflection/Unsafe — quando uma chave falta no JSON, ele **não** chama o construtor Kotlin (e portanto não aplica o valor default), só deixa o campo já alocado como `null`, mesmo em um tipo declarado não-nulo. Se o `pose-service` rodando ainda não tinha sido reconstruído com o campo `severity` (ou alguma resposta vinha de cache anterior à mudança), o app recebia `severity = null` em runtime; `severityColor()`/`isCriticalSeverity()` chamavam `.uppercase()` direto nesse valor — sem null-check, porque o tipo Kotlin garantia (incorretamente, neste caso) que nunca seria nulo — crash imediato no primeiro frame com erro detectado, exatamente ao renderizar overlay+análise no `VideoTestScreen`/`CameraScreen`.
+
+**Fix**: `severity` agora é `String?` (nullable) em `DetectedError` e `WsAlert`; `severityColor()`/`severityLabel()`/`isCriticalSeverity()` em `RiskMappers.kt` passaram a aceitar `String?` e tratam `null` como WARNING/Aviso. Não depende mais de o backend já ter sido reconstruído para não quebrar — na pior hipótese (severity ausente no JSON) o app só mostra "Aviso" em vez de "Grave", nunca crasha.
+
+**Validado**: `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`, sem erros novos. Não foi possível reproduzir o crash num device/emulador real nesta sessão (sem ambiente disponível) — a causa raiz foi confirmada por leitura de código (Gson + Kotlin non-null default é um problema documentado, e os 13 usos de `.severity` no app passam todos por essas 3 funções, todos sem null-check antes desta correção).
+
+**Pendência do usuário**: para a severidade aparecer corretamente (e não só "Aviso" por padrão), o `pose-service` rodando precisa estar reconstruído com as mudanças da entrada anterior (`docker compose up -d --build pose-service`) e o cache Redis de vídeos já analisados precisa ser limpo (`FLUSHALL`) — mesma pegadinha de cache que já aconteceu antes neste projeto (ver entrada de 2026-06-23 "Correção do threshold de KNEE_CAVE").
+
+**Resolvido nesta sessão (a pedido do usuário)**: `docker compose up -d --build pose-service` + `--force-recreate` (rebuild não trocou o container sozinho); confirmado via `docker exec` que `DetectedError.model_fields` já inclui `severity`. `GET /api/v1/pose/health` → `200 OK`. Cache Redis tinha 2 chaves (relatórios de vídeo de antes da mudança) — `redis-cli -a gymvision123 FLUSHALL` → `DBSIZE` 0. Smoke test real em `POST /api/v1/pose/analyze` confirma `"severity": "WARNING"` presente no JSON de resposta.
+
+---
+
+### Corrige usuário do Docker Hub no pipeline (`souzza-matheus` → `souzzamatheus`)
+
+Usuário confirmou que já criou a conta no Docker Hub e cadastrou os secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` no GitHub — mas o usuário real é `souzzamatheus` (sem hífen), diferente do que estava hardcoded no workflow desde a entrada de 2026-06-23 ("CI/CD: publicação das imagens também no Docker Hub").
+
+**Fix**: `DOCKERHUB_IMAGE_PREFIX` em `.github/workflows/ci.yml` (único ponto que controla as tags publicadas) `souzza-matheus/gymvision` → `souzzamatheus/gymvision`. Mesma correção replicada nos 3 documentos que descrevem o pipeline para fins de apresentação/portfólio: `CI_CD.md`, `CI_CD_VISUAL.md` (diagrama Mermaid), `CI_CD.txt` (diagrama ASCII) — todos citavam o caminho completo `docker.io/souzza-matheus/gymvision-<serviço>`.
+
+**Validado**: `yaml.safe_load()` no workflow após a edição → sem erro de sintaxe; `grep -rn "souzza-matheus"` nos 4 arquivos → nenhuma ocorrência restante.
+
+Commit: ver próximo commit no histórico do git (`ci(cd): corrige usuário do Docker Hub para souzzamatheus`).
+
+---

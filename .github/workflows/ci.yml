@@ -9,7 +9,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/gymvision
-  DOCKERHUB_IMAGE_PREFIX: souzza-matheus/gymvision
+  DOCKERHUB_IMAGE_PREFIX: souzzamatheus/gymvision
 
 jobs:
 

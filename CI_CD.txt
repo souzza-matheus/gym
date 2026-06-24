@@ -87,7 +87,7 @@ Documentação em markdown (mesma informação): CI_CD.md / CI_CD_VISUAL.md
   notification-service  -+
                           |
                           |        +-----------------------------------------+
-                          +------> | docker.io/souzza-matheus/gymvision-<servico> |
+                          +------> | docker.io/souzzamatheus/gymvision-<servico> |
                                    +-----------------------------------------+
 
   Cada serviço é publicado nos DOIS registries (mesma imagem, tags diferentes).
