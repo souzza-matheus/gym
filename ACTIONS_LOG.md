@@ -544,3 +544,15 @@ Após o push anterior (Docker Hub), usuário reportou falha de build no dashboar
 **User-service** (Gradle não rodava): dois bugs achados direto no repositório git, não no código-fonte. `user-service/gradlew` estava commitado como `100644` (sem permissão de execução) — diferente de `android-app/gradlew` e `session-service/gradlew`, ambos `100755` com o mesmíssimo conteúdo binário (mesmo hash de blob entre `user-service` e `session-service`). E `user-service/gradle/wrapper/gradle-wrapper.jar` estava commitado **vazio (0 bytes)**, causando `ClassNotFoundException: org.gradle.wrapper.GradleWrapperMain`. Corrigido: `git update-index --chmod=+x user-service/gradlew`; jar vazio substituído pela cópia válida de `session-service/gradle/wrapper/gradle-wrapper.jar` (mesma versão do Gradle, `gradle-wrapper.properties` idêntico nos dois). Não foi possível validar a suíte de testes completa localmente até o fim: o diretório local `user-service/build/` e `user-service/.gradle/` estavam órfãos de uma execução anterior como `root` (sem sudo nesta sessão pra limpar) — mas isso é sujeira do ambiente local, não existe num checkout limpo do GitHub Actions, então não deveria afetar a CI real.
 
 ---
+
+### Corrige última falha de CI: `jacocoTestReport` não existia em user-service
+
+Usuário reportou que, após a correção anterior, só sobrou 1 erro no Actions: "run tests" do user-service. Como ainda não havia `gh` CLI disponível, reproduzi copiando `user-service/` (exceto `build/`/`.gradle/`, que ficaram órfãos de root numa sessão anterior e bloqueavam build local) para um diretório limpo no scratchpad, e rodei o comando exato do CI: `./gradlew test jacocoTestReport`.
+
+**Causa raiz**: `user-service/build.gradle.kts` nunca aplicou o plugin `jacoco` — mas a CI sempre chamou `./gradlew test jacocoTestReport` (e faz upload de `build/reports/jacoco/test/jacocoTestReport.xml` pro Codecov). A task simplesmente não existia: `Task 'jacocoTestReport' not found in root project 'user-service'`.
+
+**Fix**: adicionado `jacoco` ao bloco `plugins {}`, mais `tasks.jacocoTestReport { reports { xml.required.set(true); html.required.set(true) } }` e `finalizedBy(tasks.jacocoTestReport)` no `tasks.withType<Test>`. Validado: `./gradlew test jacocoTestReport` → `BUILD SUCCESSFUL` (task `:test` continua `NO-SOURCE` — `user-service` não tem nenhum arquivo em `src/test/`, então a cobertura fica 0%, mas isso não é o que quebrava a CI; `:jacocoTestReport` agora existe e é `SKIPPED` graciosamente por falta de dados de execução, em vez de a task inteira não ser encontrada).
+
+**Pendência (não é bug de CI, é lacuna de produto)**: `user-service` não tem testes de unidade — `find src -type d` não mostra `src/test`. Considerar escrever testes se cobertura real for relevante.
+
+---
