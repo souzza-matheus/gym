@@ -573,6 +573,8 @@ Job `deploy-staging` falhava com `Error: missing server host` (`appleboy/ssh-act
 
 **Fix**: adicionado `if: ${{ secrets.STAGING_HOST != '' }}` no job `deploy-staging` em `.github/workflows/ci.yml`. Sem o secret configurado, o job aparece como "Skipped" no Actions em vez de falhar. Quando o usuário tiver um servidor real, basta cadastrar os 3 secrets (no Environment "staging", já referenciado pelo job) que o deploy volta a rodar automaticamente, sem precisar tocar no workflow de novo.
 
-**Correção (mesma sessão)**: o GitHub rejeitou o workflow na validação — `secrets` não é um contexto disponível em `if:` de **job**, só em `if:` de **step** (`Unrecognized named-value: 'secrets'`). Movida a condição do nível de job para o step "Deploy via docker compose" especificamente. Comportamento final é o mesmo (step pulado sem o secret), só mudou onde a condição é avaliada.
+**Correção (mesma sessão)**: o GitHub rejeitou o workflow na validação — `secrets` não é um contexto disponível em `if:` de **job**, só em `if:` de **step** (`Unrecognized named-value: 'secrets'`). Movida a condição do nível de job para o step "Deploy via docker compose" especificamente.
+
+**Correção 2 (mesma sessão)**: o mesmo erro persistiu mesmo no `if:` de step — `secrets` não é permitido em **nenhum** `if:` do GitHub Actions (restrição de segurança proposital, documentada). Solução definitiva: passar o secret por uma variável de ambiente do próprio step (`env: STAGING_HOST: ${{ secrets.STAGING_HOST }}`) e checar `env.STAGING_HOST != ''` no `if:` em vez de `secrets.STAGING_HOST` direto — `env` é um contexto permitido em `if:` de step, diferente de `secrets`.
 
 ---
