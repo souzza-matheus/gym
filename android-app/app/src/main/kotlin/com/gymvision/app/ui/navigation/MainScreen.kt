@@ -2,9 +2,11 @@ package com.gymvision.app.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -15,6 +17,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -23,7 +26,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.gymvision.app.api.ApiClient
 import com.gymvision.app.ui.achievements.AchievementsScreen
+import com.gymvision.app.ui.manageplans.ManagePlansScreen
+import com.gymvision.app.ui.notifications.NotificationsScreen
 import com.gymvision.app.ui.profile.ProfileScreen
 import com.gymvision.app.ui.progress.ProgressScreen
 import com.gymvision.app.ui.sessions.SessionListScreen
@@ -32,7 +38,7 @@ import com.gymvision.app.ui.workoutplan.WorkoutPlanScreen
 
 private data class BottomNavItem(val route: String, val label: String, val icon: ImageVector)
 
-private val bottomNavItems = listOf(
+private val studentNavItems = listOf(
     BottomNavItem(Routes.SESSIONS,      "Sessões",    Icons.Filled.FitnessCenter),
     BottomNavItem(Routes.WORKOUT_PLAN,  "Treino",     Icons.Filled.CalendarMonth),
     BottomNavItem(Routes.PROGRESS,      "Progresso",  Icons.Filled.TrendingUp),
@@ -41,9 +47,19 @@ private val bottomNavItems = listOf(
     BottomNavItem(Routes.PROFILE,       "Perfil",     Icons.Filled.Person),
 )
 
+private val professorNavItems = listOf(
+    BottomNavItem(Routes.NOTIFICATIONS, "Alertas",    Icons.Filled.Notifications),
+    BottomNavItem(Routes.MANAGE_PLANS,  "Planos",     Icons.Filled.Assignment),
+    BottomNavItem(Routes.PROFILE,       "Perfil",     Icons.Filled.Person),
+)
+
 @Composable
 fun MainScreen(rootNavController: NavHostController) {
     val tabNavController = rememberNavController()
+    val role = remember { ApiClient.getUserRole() ?: "" }
+    val isProfessor = role == "TEACHER" || role == "ADMIN"
+    val navItems = if (isProfessor) professorNavItems else studentNavItems
+    val startDestination = if (isProfessor) Routes.NOTIFICATIONS else Routes.SESSIONS
 
     Scaffold(
         bottomBar = {
@@ -51,7 +67,7 @@ fun MainScreen(rootNavController: NavHostController) {
                 val backStackEntry by tabNavController.currentBackStackEntryAsState()
                 val currentRoute = backStackEntry?.destination?.route
 
-                bottomNavItems.forEach { item ->
+                navItems.forEach { item ->
                     NavigationBarItem(
                         selected = currentRoute == item.route,
                         onClick = {
@@ -72,9 +88,10 @@ fun MainScreen(rootNavController: NavHostController) {
     ) { innerPadding ->
         NavHost(
             navController = tabNavController,
-            startDestination = Routes.SESSIONS,
+            startDestination = startDestination,
             modifier = Modifier.padding(innerPadding),
         ) {
+            // ── Telas de aluno ─────────────────────────────────────────────
             composable(Routes.SESSIONS) {
                 SessionListScreen(
                     onOpenCamera = { sessionId, exerciseType, studentId, academyId ->
@@ -98,6 +115,13 @@ fun MainScreen(rootNavController: NavHostController) {
             }
             composable(Routes.PROGRESS)      { ProgressScreen() }
             composable(Routes.ACHIEVEMENTS)  { AchievementsScreen() }
+            composable(Routes.VIDEO_TEST)    { VideoTestScreen() }
+
+            // ── Telas de professor / admin ─────────────────────────────────
+            composable(Routes.NOTIFICATIONS) { NotificationsScreen() }
+            composable(Routes.MANAGE_PLANS)  { ManagePlansScreen() }
+
+            // ── Perfil (compartilhado) ──────────────────────────────────────
             composable(Routes.PROFILE) {
                 ProfileScreen(
                     onLoggedOut = {
@@ -107,7 +131,6 @@ fun MainScreen(rootNavController: NavHostController) {
                     }
                 )
             }
-            composable(Routes.VIDEO_TEST)   { VideoTestScreen() }
         }
     }
 }

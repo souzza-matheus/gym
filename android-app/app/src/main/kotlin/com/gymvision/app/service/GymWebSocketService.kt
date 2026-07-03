@@ -31,21 +31,39 @@ object GymWebSocketService {
     val analysis: SharedFlow<WsAnalysis> = _analysis
 
     fun connect(studentId: String, academyId: String) {
+        connectInternal {
+            socket!!.emit("join_student", JSONObject().apply {
+                put("studentId", studentId)
+                put("academyId", academyId)
+            })
+            Log.i(TAG, "Aluno entrou na sala studentId=$studentId academyId=$academyId")
+        }
+    }
+
+    fun connectAsMonitor(userId: String, academyId: String, role: String) {
+        connectInternal {
+            socket!!.emit("join_academy", JSONObject().apply {
+                put("userId", userId)
+                put("academyId", academyId)
+                put("role", role)
+            })
+            Log.i(TAG, "$role entrou na sala academia=$academyId")
+        }
+    }
+
+    private fun connectInternal(onConnected: () -> Unit) {
+        if (socket?.connected() == true) return
         try {
             val opts = IO.Options.builder()
                 .setTransports(arrayOf("websocket"))
                 .setPath("/ws/socket.io")
                 .build()
 
-            socket = IO.socket("$WS_URL", opts)
+            socket = IO.socket(WS_URL, opts)
 
             socket!!.on(Socket.EVENT_CONNECT) {
                 Log.i(TAG, "WebSocket conectado")
-                // Aluno entra na sala própria + academia
-                socket!!.emit("join_student", JSONObject().apply {
-                    put("studentId", studentId)
-                    put("academyId", academyId)
-                })
+                onConnected()
             }
 
             socket!!.on("alert") { args ->

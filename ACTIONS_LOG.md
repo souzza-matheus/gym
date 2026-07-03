@@ -4,6 +4,65 @@ Este arquivo registra todas as ações realizadas pelo Claude no projeto `gymvis
 
 ---
 
+## 2026-07-03 (2)
+
+### Notificações push + vibração háptica por alerta
+
+Adicionado sistema de notificações push locais e vibração com padrão distinto por severidade/risco.
+
+**Arquivos alterados/criados:**
+
+1. **`AndroidManifest.xml`** — Adicionadas permissões `VIBRATE` e `POST_NOTIFICATIONS`.
+
+2. **`res/drawable/ic_notification_alert.xml`** — Ícone vetorial monocromático (triângulo de alerta) para as notificações do sistema.
+
+3. **`service/AlertNotificationHelper.kt`** — Singleton com:
+   - `init(context)`: cria os canais de notificação (`gym_alert_critical` com `IMPORTANCE_HIGH` e `gym_alert_warning` com `IMPORTANCE_DEFAULT`). Canais com vibração própria desabilitada — toda vibração é controlada manualmente via `VibrationEffect`.
+   - `notify(alert)`: dispara notificação push + vibração. Compatível com API 26–34 (`VibratorManager` em API 31+ e `Vibrator` legado abaixo).
+   - Padrões de vibração distintos por severidade/risco:
+     - **CRITICAL** → 3 pulsos longos (450ms × 3, amplitude 255) — padrão SOS
+     - **HIGH** → 2 pulsos médios (280ms × 2, amplitude 200)
+     - **MEDIUM** → 2 pulsos curtos (160ms × 2, amplitude 150)
+     - **LOW** → 1 toque leve (80ms, amplitude 100)
+
+4. **`MainActivity.kt`** — Inicializa `AlertNotificationHelper` e solicita `POST_NOTIFICATIONS` via `ActivityResultContracts.RequestPermission()` (só necessário no Android 13+).
+
+5. **`NotificationsViewModel.kt`** — Chama `AlertNotificationHelper.notify(alert)` para cada alerta recebido via WebSocket.
+
+---
+
+## 2026-07-03 (1)
+
+### Navegação por role no app Android (professor / admin)
+
+Implementada navegação diferenciada no app Android baseada no role do usuário autenticado.
+
+**Problema**: Todos os usuários (aluno, professor, admin) viam a mesma barra de navegação e telas (Sessões, Treino, Progresso, Conquistas, Testar, Perfil). Professores e admins precisavam de acesso a: alertas em tempo real das sessões dos alunos e criação/gestão de planos de treino.
+
+**O que foi feito**:
+
+1. **`GymWebSocketService.kt`** — Refatorado para suportar dois modos de conexão:
+   - `connect(studentId, academyId)`: aluno, emite `join_student` (comportamento anterior)
+   - `connectAsMonitor(userId, academyId, role)`: professor/admin, emite `join_academy` para receber alertas de todos os alunos da academia (conforme protocolo já implementado no `AlertGateway`)
+   Lógica interna extraída para `connectInternal(onConnected)`.
+
+2. **`Models.kt`** — Adicionados `CreateWorkoutPlanItemRequest` e `CreateWorkoutPlanRequest` para criação de planos via API.
+
+3. **`ApiInterfaces.kt`** — Adicionados endpoints:
+   - `WorkoutPlanApi.create(request)` → `POST /api/v1/workout-plans`
+   - `WorkoutPlanApi.delete(planId)` → `DELETE /api/v1/workout-plans/{planId}`
+   - `UserApi.listByRole(role)` → `GET /api/v1/users?role=STUDENT`
+
+4. **`Routes.kt`** — Adicionadas rotas `NOTIFICATIONS` e `MANAGE_PLANS`.
+
+5. **`ui/notifications/NotificationsViewModel.kt` + `NotificationsScreen.kt`** — Tela de alertas em tempo real para professores. Conecta via WebSocket (`join_academy`), exibe alertas recebidos com cards coloridos por severidade (CRITICAL/WARNING) e risco (LOW/MEDIUM/HIGH), com botão de limpar.
+
+6. **`ui/manageplans/ManagePlansViewModel.kt` + `ManagePlansScreen.kt`** — Tela de gestão de planos. Professor seleciona um aluno via dropdown, vê os planos ativos, pode criar novo plano (dialog com nome, dia da semana, lista de exercícios com séries/reps/carga/notas) e remover planos existentes.
+
+7. **`MainScreen.kt`** — Navegação por role: `TEACHER` e `ADMIN` veem barra com Alertas / Planos / Perfil; `STUDENT` mantém as 6 tabs anteriores. Start destination também muda por role.
+
+---
+
 ## 2026-06-18
 
 ### Correção dos 2 achados da validação com vídeos reais
@@ -576,5 +635,45 @@ Job `deploy-staging` falhava com `Error: missing server host` (`appleboy/ssh-act
 **Correção (mesma sessão)**: o GitHub rejeitou o workflow na validação — `secrets` não é um contexto disponível em `if:` de **job**, só em `if:` de **step** (`Unrecognized named-value: 'secrets'`). Movida a condição do nível de job para o step "Deploy via docker compose" especificamente.
 
 **Correção 2 (mesma sessão)**: o mesmo erro persistiu mesmo no `if:` de step — `secrets` não é permitido em **nenhum** `if:` do GitHub Actions (restrição de segurança proposital, documentada). Solução definitiva: passar o secret por uma variável de ambiente do próprio step (`env: STAGING_HOST: ${{ secrets.STAGING_HOST }}`) e checar `env.STAGING_HOST != ''` no `if:` em vez de `secrets.STAGING_HOST` direto — `env` é um contexto permitido em `if:` de step, diferente de `secrets`.
+
+---
+
+### Popula dados de demo (sessões, conquistas, ranking, plano de treino) para capturas de tela do banner WSI
+
+Usuário pediu pra popular dados boilerplate pra conseguir tirar prints do app/dashboard pro banner acadêmico (histórico de sessões, conquistas/gamificação, ranking e aba de plano de treino). A academia demo e os 4 usuários de teste já existiam (`scripts/init-db.sql`), mas sem histórico de treino algum.
+
+**Dados inseridos**: ~42 documentos em `sessions_summary` (MongoDB, `analytics-service`) para João Aluno e Teste Insomnia, distribuídos nas últimas 5 semanas, com os últimos 7 dias consecutivos preenchidos (streak), variando tipo de exercício, score, reps e contagem de alertas; agregados semanais em `student_progress`; contadores diários em `academy_stats`. Resultado real validado via `GET /api/v1/analytics/gamification/{student_id}`: nível 5, streak de 7 dias, 10 de 12 conquistas desbloqueadas. Leaderboard com 2 alunos ranqueados. Também 3 planos de treino + 8 itens inseridos direto em `workout_plans`/`workout_plan_items` (PostgreSQL, `session-service`) para João Aluno.
+
+**Bugs reais encontrados no processo** (não causados nesta sessão — a migration V4 de workout_plans nunca tinha sido de fato exercitada em produção até agora, então esses bugs estavam latentes desde que foi escrita): a tabela `workout_plans`/`workout_plan_items` (migration `V4__workout_plans.sql`) nunca tinha sido aplicada porque o container `session-service` não tinha sido rebuildado desde que o arquivo foi criado. Ao rebuildar pra aplicar a migration, o serviço entrou em **crash-loop** por dois mismatches de tipo entre a migration SQL e as entidades JPA Kotlin — exatamente a mesma classe de bug que a migration `V3` já tinha corrigido para outras colunas antes:
+1. `workout_plan_items.load_kg` criada como `NUMERIC(6,2)`, mas `WorkoutPlanItem.loadKg` é `Double` (Hibernate espera `DOUBLE PRECISION`).
+2. `workout_plans.day_of_week`, `workout_plan_items.sets`/`reps_per_set`/`order_index` criadas como `SMALLINT`, mas as entidades usam `Int` (Hibernate espera `INTEGER`).
+
+**Fix**: duas migrations novas (nunca editar uma migration Flyway já aplicada) — `V5__workout_plan_items_load_kg_double.sql` e `V6__workout_plans_smallint_to_integer.sql`, ambas `ALTER COLUMN ... TYPE` para o tipo que o Hibernate realmente espera. `session-service` rebuildado e recriado, validado `healthy` e estável (sem crash-loop) após as duas correções; testado via `GET /api/v1/workout-plans/student/{id}` pelo Kong Gateway.
+
+**Credenciais para os prints**: login em `professor@gymvision.com` (dashboard web, ranking/painel) ou `joao@gymvision.com` (app Android, histórico/conquistas/plano de treino) — senha `gymvision123` para ambos.
+
+---
+
+### Fix: erro ao carregar o perfil impedia fazer logout no app
+
+Usuário reportou "erro ao carregar o perfil pra fazer o log off" no app Android. Dois problemas reais encontrados:
+
+**1) Bug de UX (`ProfileScreen.kt`)**: quando `ProfileViewModel.load()` falha, a tela mostra só `ErrorState` com botão "Tentar novamente" — o botão "Sair" só existe dentro de `ProfileContent`, que só renderiza se o perfil carregar com sucesso. Ou seja: se o perfil falhar ao carregar por qualquer motivo, o usuário fica trancado na tela sem conseguir deslogar. **Fix**: novo composable `ProfileErrorContent` que mostra o `ErrorState` (com retry) E o botão "Sair" (chamando `viewModel.logout()`) sempre visível, mesmo com erro. Validado com `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`.
+
+**2) Causa raiz real do erro de carregamento (`user-service`)**: testando o fluxo de login de ponta a ponta (`POST /api/v1/auth/login` com `joao@gymvision.com` / `gymvision123`, a senha documentada no seed de `V1__create_users_schema.sql`), a API retornava **"Credenciais inválidas"** — login nunca funcionava com a senha documentada! O hash bcrypt usado no seed (`$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWa`) é, na verdade, o hash de exemplo clássico de tutoriais do Spring Security para a senha `"secret"`, não para `"gymvision123"` como o comentário afirmava — provavelmente copiado de algum tutorial/exemplo sem trocar pela senha real pretendida. Isso explica o erro: o app tentava logar com a senha errada (a documentada), recebia 401, e o `ProfileViewModel` falhava ao buscar `/users/me` (sem token válido) — caindo direto no bug de UX acima, sem rota de saída.
+
+**Fix**: gerada nova hash bcrypt de fato para `gymvision123`; nova migration `V3__fix_demo_password_hash.sql` em `user-service` faz `UPDATE users SET password = ... WHERE email IN (admin/professor/joao)` (nunca editar uma migration Flyway já aplicada). `user-service` rebuildado e recriado, `healthy`. Validado todo o fluxo: `POST /auth/login` → `200` com tokens válidos → `GET /users/me` com o token → `200` com os dados do perfil.
+
+---
+
+### Fix: crash ao abrir a tela de plano de treino ("Treino")
+
+Usuário reportou que o app fechava sozinho ao abrir a tela de treino, e que nenhuma sessão aparecia cadastrada.
+
+**Causa raiz**: `WorkoutPlan`/`WorkoutPlanItem` (`android-app/.../model/Models.kt`) usavam `@SerializedName` com chaves **snake_case** (`student_id`, `exercise_type`, `reps_per_set`, `order_index`, etc.), copiando o padrão usado nos modelos vindos do `analytics-service` (Python/FastAPI, que de fato serializa em snake_case). Mas o endpoint `/api/v1/workout-plans/*` é do `session-service` (Kotlin/Spring, Jackson padrão, **camelCase**) — confirmado via `curl` direto no Kong, retornando `studentId`/`exerciseType`/`repsPerSet`/`orderIndex`. Como as chaves nunca batiam, o Gson (via reflection/Unsafe, mesmo mecanismo do bug de `severity` corrigido antes) deixava campos não-nulos (`studentId`, `exerciseType`, etc.) como `null` em runtime — e como `WorkoutPlanViewModel.loadPlans()` usa `runCatching { chamada de rede }.onSuccess { ... }`, qualquer exceção de parsing dentro do `.onSuccess` **não é capturada** (o `runCatching` só protege a chamada em si, não o callback), crashando o app sem cair no `onFailure`.
+
+**Fix**: removidas as anotações `@SerializedName` incorretas de `WorkoutPlan`/`WorkoutPlanItem` — Gson agora casa os campos diretamente pelo nome camelCase da propriedade Kotlin, que já bate com o JSON real do session-service. Validado com `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`.
+
+**Sobre "nenhuma sessão cadastrada"**: a observação provavelmente foi de uma tentativa anterior, antes dos dados terem sido populados (entrada anterior desta sessão) e antes deste fix — com o plano "Treino B - Superiores" cadastrado pra quarta-feira (dia 3) e hoje sendo quarta (2026-06-24), a tela "Hoje" deve mostrar esse plano normalmente após reinstalar o APK corrigido.
 
 ---

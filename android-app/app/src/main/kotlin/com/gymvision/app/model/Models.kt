@@ -50,9 +50,16 @@ data class JointAngles(
 
 data class DetectedError(
     @SerializedName("error_type")  val errorType: String,
-    @SerializedName("risk_level")  val riskLevel: String,   // LOW | MEDIUM | HIGH
+    @SerializedName("risk_level")  val riskLevel: String,   // LOW | MEDIUM | HIGH (dirige o score)
     val description: String,
-    @SerializedName("joint_angle") val jointAngle: Float? = null
+    @SerializedName("joint_angle") val jointAngle: Float? = null,
+    // WARNING | CRITICAL (severidade exibida na UI). Nullable: Gson não aplica
+    // o default do Kotlin quando a chave falta no JSON (ex.: backend antigo,
+    // sem rebuild, ou resposta cacheada de antes deste campo existir) — deixa
+    // null via reflection mesmo com o tipo não-nulo, o que quebrava a UI ao
+    // chamar .uppercase() em severityColor()/isCriticalSeverity(). Sempre
+    // acessar via essas funções, nunca usar o valor bruto direto.
+    val severity: String? = null,
 )
 
 data class ExerciseAnalysis(
@@ -111,6 +118,7 @@ data class WsAlert(
     val exerciseType: String,
     val errorType: String,
     val riskLevel: String,
+    val severity: String? = null,  // ver comentário em DetectedError — Gson não respeita default em chave ausente
     val description: String,
     val score: Float,
     val phase: String,
@@ -204,23 +212,48 @@ data class GamificationResponse(
 
 // ── Plano de treino ───────────────────────────────────────────────────────────
 
+data class CreateWorkoutPlanItemRequest(
+    val exerciseType: String,
+    val sets: Int,
+    val repsPerSet: Int,
+    val loadKg: Double?,
+    val notes: String?,
+    val orderIndex: Int,
+)
+
+data class CreateWorkoutPlanRequest(
+    val academyId: String,
+    val studentId: String,
+    val professorId: String,
+    val name: String,
+    val dayOfWeek: Int?,
+    val items: List<CreateWorkoutPlanItemRequest>,
+)
+
+
+
+// session-service (Kotlin/Spring) serializa em camelCase por padrão (Jackson
+// sem naming strategy customizada) — diferente do pose-service (Python),
+// que usa snake_case. @SerializedName aqui tinha nomes snake_case que nunca
+// batiam com o JSON real, deixando os campos não-nulos como null via
+// reflection do Gson e causando crash ao abrir a tela de plano de treino.
 data class WorkoutPlanItem(
     val id: String,
-    @SerializedName("exercise_type") val exerciseType: String,
+    val exerciseType: String,
     val sets: Int,
-    @SerializedName("reps_per_set")  val repsPerSet: Int,
-    @SerializedName("load_kg")       val loadKg: Double?,
+    val repsPerSet: Int,
+    val loadKg: Double?,
     val notes: String?,
-    @SerializedName("order_index")   val orderIndex: Int,
+    val orderIndex: Int,
 )
 
 data class WorkoutPlan(
     val id: String,
-    @SerializedName("student_id")   val studentId: String,
-    @SerializedName("academy_id")   val academyId: String,
-    @SerializedName("professor_id") val professorId: String,
+    val studentId: String,
+    val academyId: String,
+    val professorId: String,
     val name: String,
-    @SerializedName("day_of_week")  val dayOfWeek: Int?,
+    val dayOfWeek: Int?,
     val active: Boolean,
     val items: List<WorkoutPlanItem>,
 )

@@ -4,12 +4,16 @@ object Routes {
     const val LOGIN = "login"
     const val MAIN = "main"
 
-    const val SESSIONS      = "sessions"
-    const val PROGRESS      = "progress"
-    const val ACHIEVEMENTS  = "achievements"
-    const val PROFILE       = "profile"
-    const val VIDEO_TEST    = "video_test"
-    const val WORKOUT_PLAN  = "workout_plan"
+    const val SESSIONS       = "sessions"
+    const val PROGRESS       = "progress"
+    const val ACHIEVEMENTS   = "achievements"
+    const val PROFILE        = "profile"
+    const val VIDEO_TEST     = "video_test"
+    const val WORKOUT_PLAN   = "workout_plan"
+
+    // Rotas exclusivas de professor / admin
+    const val NOTIFICATIONS  = "notifications"
+    const val MANAGE_PLANS   = "manage_plans"
 
     const val CAMERA       = "camera/{sessionId}/{exerciseType}/{studentId}/{academyId}"
     const val CAMERA_GUIDE = "camera_guide/{sessionId}/{exerciseType}/{studentId}/{academyId}"

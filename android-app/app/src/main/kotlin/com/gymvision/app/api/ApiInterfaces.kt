@@ -67,11 +67,20 @@ interface UserApi {
 
     @DELETE("api/v1/users/me")
     suspend fun deleteMyAccount(): Response<Void>
+
+    @GET("api/v1/users")
+    suspend fun listByRole(@Query("role") role: String): Response<ApiResponse<List<UserDto>>>
 }
 
 interface WorkoutPlanApi {
     @GET("api/v1/workout-plans/student/{studentId}")
     suspend fun listByStudent(@Path("studentId") studentId: String): Response<ApiResponse<List<WorkoutPlan>>>
+
+    @POST("api/v1/workout-plans")
+    suspend fun create(@Body request: CreateWorkoutPlanRequest): Response<ApiResponse<WorkoutPlan>>
+
+    @DELETE("api/v1/workout-plans/{planId}")
+    suspend fun delete(@Path("planId") planId: String): Response<Void>
 }
 
 interface AnalyticsApi {
