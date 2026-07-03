@@ -3,7 +3,10 @@ package com.gymvision.app.ui.camera
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
 import androidx.camera.core.ImageProxy
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -352,11 +355,43 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? = runCatching {
-        val buffer = imageProxy.planes[0].buffer
-        val bytes  = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val nv21 = yuv420ToNv21(imageProxy)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
+        ByteArrayOutputStream().use { out ->
+            yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 85, out)
+            BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
+        }
     }.getOrNull()
+
+    private fun yuv420ToNv21(image: ImageProxy): ByteArray {
+        val width       = image.width
+        val height      = image.height
+        val nv21        = ByteArray(width * height * 3 / 2)
+        val yPlane      = image.planes[0]
+        val uPlane      = image.planes[1]
+        val vPlane      = image.planes[2]
+        val yBuf        = yPlane.buffer
+        val uBuf        = uPlane.buffer
+        val vBuf        = vPlane.buffer
+        val yRowStride  = yPlane.rowStride
+        val uvRowStride = uPlane.rowStride
+        val uvPixStride = uPlane.pixelStride
+        for (row in 0 until height) {
+            yBuf.position(row * yRowStride)
+            yBuf.get(nv21, row * width, width)
+        }
+        val vuBase = width * height
+        for (row in 0 until height / 2) {
+            for (col in 0 until width / 2) {
+                val dst = vuBase + row * width + col * 2
+                vBuf.position(row * uvRowStride + col * uvPixStride)
+                nv21[dst]     = vBuf.get()
+                uBuf.position(row * uvRowStride + col * uvPixStride)
+                nv21[dst + 1] = uBuf.get()
+            }
+        }
+        return nv21
+    }
 
     private fun bitmapToJpeg(bitmap: Bitmap, rotationDegrees: Int): ByteArray? = runCatching {
         val matrix  = Matrix().apply { postRotate(rotationDegrees.toFloat()) }

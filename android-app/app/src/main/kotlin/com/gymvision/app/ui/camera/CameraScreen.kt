@@ -11,10 +11,16 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
@@ -43,6 +50,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,10 +83,12 @@ import com.gymvision.app.model.DetectedError
 import com.gymvision.app.model.WsAlert
 import com.gymvision.app.service.GymWebSocketService
 import com.gymvision.app.ui.components.ScoreGauge
+import com.gymvision.app.ui.components.errorDescription
 import com.gymvision.app.ui.components.errorIcon
 import com.gymvision.app.ui.components.exerciseLabel
+import com.gymvision.app.ui.components.isCriticalSeverity
 import com.gymvision.app.ui.components.phaseLabel
-import com.gymvision.app.ui.components.riskColor
+import com.gymvision.app.ui.components.severityColor
 import com.gymvision.app.ui.theme.RiskLow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -126,12 +137,13 @@ fun CameraScreen(
     var showEndDialog by remember { mutableStateOf(false) }
     var alertBanner by remember { mutableStateOf<WsAlert?>(null) }
     var showExercisePicker by remember { mutableStateOf(false) }
+    var useFrontCamera by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         GymWebSocketService.alerts.collect { alert ->
             if (alert.studentId == studentId) {
                 alertBanner = alert
-                tts?.speak(alert.description, TextToSpeech.QUEUE_FLUSH, null, alert.errorType)
+                tts?.speak(errorDescription(alert.errorType), TextToSpeech.QUEUE_FLUSH, null, alert.errorType)
             }
         }
     }
@@ -147,6 +159,7 @@ fun CameraScreen(
         if (hasCameraPermission) {
             CameraPreviewWithOverlay(
                 landmarks = state.landmarks,
+                useFrontCamera = useFrontCamera,
                 onFrame = { imageProxy ->
                     viewModel.onFrame(imageProxy, exerciseType, sessionId, studentId, academyId)
                 },
@@ -169,16 +182,27 @@ fun CameraScreen(
             RepCounterBadge(repCount = state.repCount)
         }
 
-        FloatingActionButton(
-            onClick = { showEndDialog = true },
+        Column(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
                 .padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = Color.White,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Filled.Stop, contentDescription = "Encerrar sessão")
+            FloatingActionButton(
+                onClick = { showEndDialog = true },
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = Color.White,
+            ) {
+                Icon(Icons.Filled.Stop, contentDescription = "Encerrar sessão")
+            }
+            SmallFloatingActionButton(
+                onClick = { useFrontCamera = !useFrontCamera },
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                Icon(Icons.Filled.FlipCameraAndroid, contentDescription = "Trocar câmera")
+            }
         }
 
         AnimatedVisibility(
@@ -329,6 +353,7 @@ private fun AutoDetectScanBanner(progress: Int, modifier: Modifier = Modifier) {
 @Composable
 private fun CameraPreviewWithOverlay(
     landmarks: List<com.gymvision.app.model.Landmark>,
+    useFrontCamera: Boolean = false,
     onFrame: (androidx.camera.core.ImageProxy) -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -339,41 +364,48 @@ private fun CameraPreviewWithOverlay(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
-
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-
-                    val preview = Preview.Builder().build().also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
+        key(useFrontCamera) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx).apply {
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
                     }
 
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
 
-                    imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy -> onFrame(imageProxy) }
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
 
-                    runCatching {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageAnalysis,
-                        )
-                    }
-                }, ContextCompat.getMainExecutor(ctx))
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
 
-                previewView
-            },
-        )
+                        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy -> onFrame(imageProxy) }
+
+                        val cameraSelector = if (useFrontCamera)
+                            CameraSelector.DEFAULT_FRONT_CAMERA
+                        else
+                            CameraSelector.DEFAULT_BACK_CAMERA
+
+                        runCatching {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageAnalysis,
+                            )
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+
+                    previewView
+                },
+            )
+        }
 
         PoseOverlay(landmarks = landmarks, modifier = Modifier.fillMaxSize())
     }
@@ -461,21 +493,52 @@ private fun PhaseChip(phase: String) {
     }
 }
 
+/** Ícone que pulsa (alpha) enquanto exibido — usado para alertas GRAVE (risco de lesão). */
+@Composable
+private fun PulsingWarningIcon(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    val transition = rememberInfiniteTransition(label = "alert-pulse")
+    val alpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 600),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "alert-pulse-alpha",
+    )
+    Icon(
+        Icons.Filled.Warning,
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier.alpha(alpha),
+    )
+}
+
 @Composable
 private fun AlertBanner(alert: WsAlert) {
+    val critical = isCriticalSeverity(alert.severity)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = riskColor(alert.riskLevel),
+        color = severityColor(alert.severity),
         shadowElevation = 8.dp,
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
+            if (critical) {
+                PulsingWarningIcon()
+            } else {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
+            }
             Spacer(modifier = Modifier.width(12.dp))
-            Text(alert.description, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = errorDescription(alert.errorType),
+                color = Color.White,
+                style = if (critical) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                fontWeight = if (critical) FontWeight.Bold else FontWeight.Normal,
+            )
         }
     }
 }
@@ -539,18 +602,31 @@ private fun ErrorsCard(errors: List<DetectedError>, modifier: Modifier = Modifie
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 errors.forEach { error ->
+                    val critical = isCriticalSeverity(error.severity)
                     Row(
                         modifier = Modifier.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = errorIcon(error.errorType),
-                            contentDescription = null,
-                            tint = riskColor(error.riskLevel),
-                            modifier = Modifier.size(20.dp),
-                        )
+                        if (critical) {
+                            PulsingWarningIcon(
+                                modifier = Modifier.size(22.dp),
+                                tint = severityColor(error.severity),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = errorIcon(error.errorType),
+                                contentDescription = null,
+                                tint = severityColor(error.severity),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = error.description, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = errorDescription(error.errorType),
+                            style = if (critical) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (critical) FontWeight.Bold else FontWeight.Normal,
+                            color = if (critical) severityColor(error.severity) else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
