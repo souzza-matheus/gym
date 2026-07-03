@@ -19,7 +19,7 @@ import org.json.JSONObject
 object GymWebSocketService {
 
     private const val TAG = "GymWS"
-    private const val WS_URL = "http://10.0.2.2:8085"   // emulador
+    private val WS_URL = "http://${com.gymvision.app.BuildConfig.API_HOST}:8085"
 
     private val gson = Gson()
     private var socket: Socket? = null

@@ -21,8 +21,7 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
 
-    // Kong Gateway — porta 8090
-    private const val BASE_URL = "http://10.0.2.2:8090/"   // emulador → localhost do host
+    private val BASE_URL = "http://${com.gymvision.app.BuildConfig.API_HOST}:8090/"
 
     private lateinit var prefs: SharedPreferences
     private val gson = Gson()

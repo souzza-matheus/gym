@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Host do servidor backend.
+// Padrão "10.0.2.2" = localhost do host no emulador Android.
+// Para gerar APK do celular físico passe -PapiHost=<IP_DA_SUA_MAQUINA>
+// Exemplo: ./gradlew assembleDebug -PapiHost=192.168.1.100
+val apiHost: String = (project.findProperty("apiHost") as String?) ?: "10.0.2.2"
+
 android {
     namespace = "com.gymvision.app"
     compileSdk = 34
@@ -13,6 +19,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+
+        buildConfigField("String", "API_HOST", "\"$apiHost\"")
     }
 
     buildTypes {
@@ -23,6 +31,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
