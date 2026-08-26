@@ -16,6 +16,7 @@ export interface AlertPayload {
   exerciseType: string;
   errorType: string;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  severity: 'WARNING' | 'CRITICAL';
   description: string;
   jointAngle?: number;
   score: number;
@@ -32,8 +33,12 @@ export interface AlertPayload {
  *
  * O frontend/app entra na sala após autenticar via JWT.
  */
+// CORS_ORIGINS="*" (padrão dev) ou lista separada por vírgula em produção —
+// avaliado no carregamento do módulo (variável já definida pelo docker-compose).
+const corsOrigins = process.env.CORS_ORIGINS?.split(',').map(o => o.trim()) ?? '*';
+
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: corsOrigins, credentials: corsOrigins !== '*' },
   namespace: '/ws',
   transports: ['websocket', 'polling'],
 })

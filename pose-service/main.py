@@ -11,9 +11,11 @@ Ambos persistem no TimescaleDB e publicam no RabbitMQ.
 import asyncio
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import Optional
 
 
 class _JsonFormatter(logging.Formatter):
@@ -40,7 +42,7 @@ import video_storage as storage
 from config import settings
 from exercise_analyzer import ExerciseAnalyzer
 from models import (
-    ExerciseAnalysis, ExerciseType, HealthResponse,
+    ExerciseAnalysis, ExerciseType, HealthResponse, Landmark,
     PoseAnalysisResponse, MovementPhase, JointAngles,
 )
 from tf_serving_client import tf_client
@@ -82,8 +84,19 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
 )
+# CORS_ORIGINS="*" (padrão dev) ou lista separada por vírgula em produção
+# (ex.: "https://academia.com,https://app.academia.com") — permite que app
+# Android, dashboard web e personal remoto acessem de redes diferentes
+# (Wi-Fi da academia, 4G/5G, VPN) sem bloqueio de origem.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",")]
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],  # allow_credentials+"*" é inválido por spec CORS
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Process-Time"],
+    max_age=3600,
 )
 
 
@@ -115,38 +128,58 @@ async def pose_health():
     summary="Analisa um frame JPEG — endpoint principal do app Android",
 )
 async def analyze_pose(
-    frame:         UploadFile = File(..., description="Frame JPEG (480×640, câmera lateral)"),
-    exercise_type: str        = Form(..., description="SQUAT | DEADLIFT | LUNGE"),
-    session_id:    str        = Form(default="no-session"),
-    student_id:    str        = Form(default="no-student"),
-    academy_id:    str        = Form(default="unknown"),
-    frame_seq:     int        = Form(default=0),
+    frame:          UploadFile     = File(..., description="Frame JPEG (480×640, câmera lateral)"),
+    exercise_type:  str            = Form(..., description="SQUAT | DEADLIFT | LUNGE"),
+    session_id:     str            = Form(default="no-session"),
+    student_id:     str            = Form(default="no-student"),
+    academy_id:     str            = Form(default="unknown"),
+    frame_seq:      int            = Form(default=0),
+    landmarks_json: Optional[str]  = Form(
+        default=None,
+        description=(
+            "Landmarks já computados on-device (JSON), usado pelo SyncWorker "
+            "do app ao reenviar frames analisados offline. Quando presente, "
+            "pula a inferência TF Serving e reusa esses landmarks — o `frame` "
+            "enviado junto é só um placeholder para satisfazer o multipart."
+        ),
+    ),
 ):
     try:
         ex_type = ExerciseType(exercise_type.upper())
     except ValueError:
         raise HTTPException(400, f"exercise_type inválido: '{exercise_type}'")
 
-    if frame.content_type not in ("image/jpeg","image/png","application/octet-stream"):
-        raise HTTPException(415, f"Content-Type inválido: {frame.content_type}")
+    if landmarks_json is not None:
+        # Sync de frame analisado offline: landmarks já vieram prontos do
+        # dispositivo (ML Kit), não há imagem real pra rodar TF Serving.
+        try:
+            landmarks = [Landmark(**d) for d in json.loads(landmarks_json)]
+        except Exception as e:
+            raise HTTPException(400, f"landmarks_json inválido: {e}")
+        inference_ms = 0.0
+        orientation = None
+        frame_w, frame_h = 0, 0
+    else:
+        if frame.content_type not in ("image/jpeg","image/png","application/octet-stream"):
+            raise HTTPException(415, f"Content-Type inválido: {frame.content_type}")
 
-    frame_bytes = await frame.read()
-    if not frame_bytes:
-        raise HTTPException(400, "Frame vazio.")
-    if len(frame_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(413, "Frame muito grande (máx 10 MB).")
+        frame_bytes = await frame.read()
+        if not frame_bytes:
+            raise HTTPException(400, "Frame vazio.")
+        if len(frame_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(413, "Frame muito grande (máx 10 MB).")
 
-    img = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise HTTPException(422, "Frame não pôde ser decodificado.")
+        img = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(422, "Frame não pôde ser decodificado.")
 
-    frame_h, frame_w = img.shape[:2]
+        frame_h, frame_w = img.shape[:2]
 
-    # 1. MoveNet Thunder via TF Serving gRPC
-    try:
-        landmarks, inference_ms, orientation = tf_client.predict(frame_bytes)
-    except Exception as e:
-        raise HTTPException(500, f"Erro na detecção de pose: {e}")
+        # 1. MoveNet Thunder via TF Serving gRPC
+        try:
+            landmarks, inference_ms, orientation = tf_client.predict(frame_bytes)
+        except Exception as e:
+            raise HTTPException(500, f"Erro na detecção de pose: {e}")
 
     # 2. Analyzer in-process (< 5ms) — reutiliza orientação já detectada pelo TF client
     result = _analyzer.analyze(SimpleNamespace(
@@ -346,6 +379,7 @@ async def analyze_video(
                 exercise_type=exercise_type,
                 error_type=alert["error_type"],
                 risk_level=alert["risk_level"],
+                severity=alert.get("severity", "WARNING"),
                 description=alert["description"],
                 joint_angle=alert.get("joint_angle"),
                 score=alert["score"],
