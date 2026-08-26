@@ -7,7 +7,9 @@ import com.gymvision.app.model.WsAnalysis
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 
 /**
@@ -24,11 +26,17 @@ object GymWebSocketService {
     private val gson = Gson()
     private var socket: Socket? = null
 
-    private val _alerts   = MutableSharedFlow<WsAlert>(extraBufferCapacity = 20)
-    private val _analysis = MutableSharedFlow<WsAnalysis>(extraBufferCapacity = 50)
+    private val _alerts     = MutableSharedFlow<WsAlert>(extraBufferCapacity = 20)
+    private val _analysis   = MutableSharedFlow<WsAnalysis>(extraBufferCapacity = 50)
+    private val _isConnected = MutableStateFlow(false)
 
-    val alerts:   SharedFlow<WsAlert>    = _alerts
-    val analysis: SharedFlow<WsAnalysis> = _analysis
+    val alerts:      SharedFlow<WsAlert>    = _alerts
+    val analysis:    SharedFlow<WsAnalysis> = _analysis
+    // Estado real do socket — não confundir com "algum alerta já chegou".
+    // Uma sala pode estar corretamente conectada e nunca ter recebido
+    // alerta nenhum (aluno sem erro de execução ainda), o que é bem
+    // diferente de "o WebSocket nunca conseguiu conectar".
+    val isConnected: StateFlow<Boolean>     = _isConnected
 
     fun connect(studentId: String, academyId: String) {
         connectInternal {
@@ -54,15 +62,23 @@ object GymWebSocketService {
     private fun connectInternal(onConnected: () -> Unit) {
         if (socket?.connected() == true) return
         try {
+            // O `/ws` faz parte da URL (define o namespace Socket.IO do
+            // AlertGateway, que usa `namespace: '/ws'`), não do path do
+            // engine.io — igual ao dashboard (`io(`${WS_URL}/ws`, ...)`).
+            // Setar path("/ws/socket.io") aqui troca o path de handshake do
+            // engine.io para algo que o servidor nunca serviu (ele só
+            // customiza o namespace, mantém o path padrão /socket.io/),
+            // fazendo o handshake sempre falhar (404) e o socket nunca conectar
+            // — mesmo com o resto do app (REST) reportando "online" normalmente.
             val opts = IO.Options.builder()
                 .setTransports(arrayOf("websocket"))
-                .setPath("/ws/socket.io")
                 .build()
 
-            socket = IO.socket(WS_URL, opts)
+            socket = IO.socket("$WS_URL/ws", opts)
 
             socket!!.on(Socket.EVENT_CONNECT) {
                 Log.i(TAG, "WebSocket conectado")
+                _isConnected.value = true
                 onConnected()
             }
 
@@ -83,6 +99,11 @@ object GymWebSocketService {
 
             socket!!.on(Socket.EVENT_DISCONNECT) {
                 Log.i(TAG, "WebSocket desconectado")
+                _isConnected.value = false
+            }
+            socket!!.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                Log.e(TAG, "Erro de conexão WebSocket: ${args.firstOrNull()}")
+                _isConnected.value = false
             }
 
             socket!!.connect()
@@ -95,5 +116,6 @@ object GymWebSocketService {
         socket?.disconnect()
         socket?.off()
         socket = null
+        _isConnected.value = false
     }
 }
