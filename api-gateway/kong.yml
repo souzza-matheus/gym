@@ -1,6 +1,32 @@
 _format_version: "3.0"
 _transform: true
 
+# CORS global — cobre todas as rotas/serviços abaixo em um único ponto,
+# evitando configurar CORS individualmente em cada microsserviço interno.
+# Em produção, substituir "*" por lista explícita de origens confiáveis.
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        - PATCH
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-Request-ID
+      exposed_headers:
+        - X-Request-ID
+      credentials: true
+      max_age: 3600
+      preflight_continue: false
+
 services:
   - name: user-service
     url: http://user-service:8081
