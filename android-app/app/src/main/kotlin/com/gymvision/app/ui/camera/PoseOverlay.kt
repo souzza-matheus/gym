@@ -20,7 +20,11 @@ private val SKELETON_CONNECTIONS = listOf(
     27 to 31, 28 to 32, // pés
 )
 
-private const val MIN_VISIBILITY = 0.4f
+// 0.3 (era 0.4) — em posições agachadas/oclusão parcial (ex.: joelho atrás da
+// barra), a confiança de extremidades inferiores cai tipicamente para 0.3-0.4
+// mesmo com o corpo todo visível em câmera; com 0.4 esses pontos eram
+// descartados do overlay, deixando o esqueleto incompleto sem motivo real.
+private const val MIN_VISIBILITY = 0.3f
 private val ConnectionColor = Color(0xFF00D4AA)
 
 /**
