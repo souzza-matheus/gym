@@ -4,6 +4,164 @@ Este arquivo registra todas as ações realizadas pelo Claude no projeto `gymvis
 
 ---
 
+## 2026-08-26 (1)
+
+### Validação de cálculos biomecânicos/thresholds do TCC, testes novos e CORS cross-network
+
+Executado prompt extenso (5 blocos) pedindo validação de ângulos/thresholds
+biomecânicos contra a literatura citada, verificação de dados experimentais,
+geração de testes e configuração de CORS cross-network. Relatório completo em
+`pose-service/RELATORIO_CALCULOS_BIOMEDICOS.md`.
+
+**Achado principal**: o prompt de origem foi escrito para uma versão anterior/
+hipotética de `exercise_analyzer.py` e `angle_calculator.py` — diverge do
+código real em vários pontos estruturais, não só em valores. Os mais
+relevantes: `back_angle` real usa fórmula de 2 pontos (ombro-quadril vs.
+vertical), não 3 pontos (ombro-quadril-joelho) como o prompt assumia — os
+landmarks sintéticos do prompt não reproduzem os erros descritos quando
+passados pelo pipeline real; `KNEE_CAVE` usa threshold 2.0 (não 4.0) e métrica
+sem dividir pela largura dos ombros; `BENT_OVER_ROW` não tem
+`TORSO_NOT_PARALLEL` implementado; `LUNGE` não tem `KNEE_CAVE` nem
+`FRONT_KNEE_FORWARD`. Todas as divergências foram documentadas no relatório,
+sem alterar a lógica de `exercise_analyzer.py` (nenhum bug real foi
+encontrado — só desalinhamento entre a doc de origem e o código).
+
+**Testes**: suíte já tinha 83 testes (não 34 como o prompt assumia; `LUNGE`
+de fato não tinha classe dedicada). Adicionados 15 testes novos em
+`pose-service/tests/test_exercise_analyzer_extended.py` (LUNGE, boundary
+conditions, câmera lateral/frontal, visibilidade baixa, extremos de score) —
+suíte completa passa em 98 testes.
+
+**CORS/cross-network**: `pose-service/main.py` e
+`notification-service/src/{main.ts,gateway/alert.gateway.ts}` passam a ler
+`CORS_ORIGINS` do ambiente (default `*`); plugin `cors` global adicionado ao
+`api-gateway/kong.yml` (não existia nenhum antes); `docker-compose.yml` e
+`.env.example` atualizados; `dashboard/src/hooks/useAlerts.ts` ganhou
+fallback `polling` + reconexão explícita no Socket.IO client. **Não**
+implementado o `ConfigLoader.kt`/`config.json` runtime pedido pelo prompt de
+origem para o Android — o projeto já tem mecanismo equivalente funcional
+(`API_HOST` via propriedade Gradle, `build.gradle.kts:10`); duplicar criaria
+duas fontes de verdade divergentes. TS não foi compilado localmente (sem
+`node_modules`); testes `curl`/WebSocket cross-network não executados (exigem
+`docker compose up`).
+
+---
+
+## 2026-07-03 (8)
+
+### Fix: app do professor crashava de novo ao receber DOIS alertas no mesmo segundo (key duplicada no LazyColumn)
+
+Terceiro crash em sequência na tela de Alertas, depois dos dois anteriores corrigidos. Logcat:
+
+```
+FATAL EXCEPTION: main
+java.lang.IllegalArgumentException: Key "4092c866-...2026-07-03T20:16:52Z" was already used.
+  If you are using LazyColumn/Row please make sure you provide a unique key for each item.
+```
+
+**Causa raiz**: `NotificationsScreen.kt` usava `items(alerts, key = { it.sessionId + it.timestamp })` no `LazyColumn`. O `timestamp` gerado em `pose-service/messaging.py::_publish()` só tem granularidade de **segundo** (`time.strftime("%Y-%m-%dT%H:%M:%SZ", ...)`, sem milissegundos). Erros de joelho esquerdo E direito colapsando no mesmo frame (bem comum — squat com problema de valgo bilateral) geram dois alertas separados na mesma chamada de `publish_result()`, publicados praticamente ao mesmo tempo — se caírem no mesmo segundo (comum), a key `sessionId+timestamp` fica idêntica pros dois, e o Compose crasha na key duplicada.
+
+**Fix**: em vez de depender de campos vindos do backend (frágil a colisão), `NotificationsViewModel` agora envolve cada `WsAlert` recebido num `AlertItem(id = UUID.randomUUID().toString(), alert)` gerado no cliente no momento em que chega — cada alerta tem uma identidade garantidamente única, independente de qualquer coincidência de timing do servidor. `NotificationsScreen.kt` usa `key = { it.id }`.
+
+**Validação**: reproduzido o cenário exato (joelho esquerdo + direito no mesmo frame, `landmarks_json` com ambos os joelhos colapsando) via `curl` direto no `pose-service` — confirmado no `curl` que os dois erros disparam (`KNEE_CAVE_LEFT` e `KNEE_CAVE_RIGHT`), e no logcat do emulador que os dois alertas chegam (`GymWS: Alerta recebido` × 2) sem `FATAL EXCEPTION`, mesmo PID do app antes/depois.
+
+**Nota**: o celular físico desconectou do adb nesta sessão (provavelmente desplugado pelo usuário pra testar a câmera sem fio) — build atualizada (`-PapiHost=192.168.1.10`) ainda não reinstalada nele, só no emulador. Reinstalar assim que reconectar.
+
+---
+
+## 2026-07-03 (7)
+
+### Fix: app do professor crashava ao receber alerta (`exercise_type` ausente) + `notification-service` rodando build de 2 semanas atrás
+
+Depois dos fixes anteriores (WebSocket conectando certo), o primeiro alerta de verdade que chegou no emulador derrubou o app. Logcat mostrou:
+
+```
+FATAL EXCEPTION: main
+java.lang.NullPointerException: Parameter specified as non-null is null: method
+  com.gymvision.app.ui.components.RiskMappersKt.exerciseLabel, parameter exerciseType
+  at ...AlertNotificationHelper.notify(AlertNotificationHelper.kt:89)
+```
+
+**Causa raiz (bug real, não relacionado aos fixes anteriores)**: `pose-service/messaging.py::publish_result()` publica o alerta throttled (5s) do caminho de câmera ao vivo (`gym.alert.created`) SEM o campo `exercise_type` — só `publish_alert()` (usado pelo modo vídeo) incluía esse campo. `WsAlert.exerciseType` no Android é `String` não-nulo; Gson desserializa a chave ausente como `null` mesmo assim (não passa pelo construtor Kotlin, não respeita null-safety) — daí o crash ao tentar usar esse valor em `exerciseLabel()`. Esse bug é antigo (estava assim antes desta sessão) mas só apareceu agora porque os alertas da câmera ao vivo nunca tinham chegado de verdade até os fixes anteriores desta sessão (rep counting + WebSocket path/namespace).
+
+**Fix**: adicionado `"exercise_type": result.exercise_type.value` no payload de `publish_result()`, igualando ao `publish_alert()`.
+
+**Bug secundário encontrado no processo**: testando a correção, o campo `severity` também não chegava no alerta recebido via WebSocket, mesmo o `messaging.py` já enviando corretamente. Causa: o container `gymvision-notify-svc` rodava uma imagem buildada em **2026-06-16** (`docker inspect` confirmou), 2+ semanas desatualizada — o código-fonte de `alert.consumer.ts` (com o tratamento de `severity`) já estava no working tree (não commitado) há um tempo, mas nunca tinha sido buildado/deployado de fato. Fix: `docker compose build notification-service` + `up -d`.
+
+**Validação**: rebuild + restart de `pose-service` e `notification-service`; teste via script Node com `socket.io-client` (mesma lib do dashboard) escutando `/ws` — confirmado `exerciseType: "SQUAT"` e `severity: "CRITICAL"` presentes no payload recebido. Disparado o mesmo teste contra o app real no emulador via `curl` no `/api/v1/pose/analyze`: alerta recebido (`GymWS: Alerta recebido: MEDIUM`) sem crash, mesmo PID do processo antes/depois.
+
+**Lição**: ao investigar "X não funciona" num pipeline com múltiplos serviços Docker, sempre conferir `docker inspect <container> --format '{{.Created}}'` contra a data das mudanças no código-fonte — código correto no disco não significa nada se o container não foi rebuildado.
+
+---
+
+## 2026-07-03 (6)
+
+### Continuação do fix de WebSocket: label "Aguardando conexão…" enganosa + erro de instalação cruzada emulador/celular
+
+Depois do fix do bug de path/namespace do WebSocket (entrada anterior), usuário reportou que "Aguardando conexão" continuava aparecendo. Dois problemas, nenhum sendo regressão do fix anterior:
+
+**1) Erro meu: instalei o APK errado no dispositivo errado.** `android-app/app/build.gradle.kts` usa `apiHost = -PapiHost=<IP> ?? "10.0.2.2"` — o default `10.0.2.2` só é resolvível *dentro do emulador* (alias especial pro host); um celular físico na mesma Wi-Fi precisa do IP real da máquina (`192.168.1.10` nesta rede). Rebuildei sem passar `-PapiHost` e instalei esse APK (configurado pro emulador) no celular físico (`ZF525DQ6XZ`, motorola edge 60 fusion) por engano — óbvio que não ia conectar em nada. Confirmado via `dumpsys package | grep lastUpdateTime` que o celular físico tinha instalado uma build de antes de qualquer um dos fixes desta sessão. Fix: rebuild com `-PapiHost=192.168.1.10` especificamente pro celular; validado que os dois ports (8090 REST, 8085 WS) estão acessíveis do celular via `adb shell nc -z -w2 192.168.1.10 <porta>` (ambos `OPEN`) e via `ping` (RTT ~30ms, mesma rede). A partir de agora: **build pro emulador não leva `-PapiHost`, build pro celular físico leva `-PapiHost=192.168.1.10`** — nunca instalar o mesmo APK nos dois.
+
+**2) Bug real de UX**: o texto "Aguardando conexão…"/"N alerta(s) recebido(s)" em `NotificationsScreen.kt` nunca refletiu o estado real do socket — só checava `alerts.isEmpty()`. Isso significa que mesmo com o WebSocket plenamente conectado (confirmado via logcat do emulador: `GymWS: WebSocket conectado` + `GymWS: TEACHER entrou na sala academia=...`), a tela continuava dizendo "Aguardando conexão…" até o primeiro alerta chegar — o que é uma mensagem completamente diferente de "não conseguiu conectar". Como nenhuma sessão de câmera real tinha rodado ainda nessa janela de teste (confirmado: zero chamadas a `/api/v1/pose/analyze` nos logs do `pose-service` no período), fazia sentido nenhum alerta ter chegado ainda — mas o texto não deixava isso claro. **Fix**: `GymWebSocketService` ganhou um `StateFlow<Boolean> isConnected` de verdade (setado em `EVENT_CONNECT`/`EVENT_DISCONNECT`/`EVENT_CONNECT_ERROR`), exposto via `NotificationsViewModel`, e a UI agora distingue três estados: "Conectando…" (socket ainda não conectou), "Conectado — nenhum alerta ainda" (conectado, zero alertas), e "N alerta(s) recebido(s)".
+
+**Validado**: `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`; builds separadas pros dois dispositivos instaladas e relançadas sem crash (emulador PID 8126, celular físico PID 16312). Próximo passo pro usuário: rodar uma sessão de câmera de verdade no celular físico (com a build correta já instalada) e conferir se o alerta aparece no emulador (logado como professor).
+
+---
+
+## 2026-07-03 (5)
+
+### Fix: WebSocket do app Android nunca conectava ("Aguardando conexão…" preso mesmo com o app online)
+
+Usuário reportou que, mesmo com o app mobile "online", a tela de Alertas (`NotificationsScreen.kt`) ficava travada em "Aguardando conexão…" (esse texto na verdade só reflete `alerts.isEmpty()`, não o estado real do socket — mas o sintoma real é que nenhum alerta jamais chegava por WebSocket).
+
+**Causa raiz**: `GymWebSocketService.kt` conectava com `IO.socket(WS_URL, opts)` onde `opts` setava `.setPath("/ws/socket.io")`. Isso confunde dois conceitos distintos do Socket.IO: **path** (endpoint HTTP do handshake do engine.io, default `/socket.io/`) vs **namespace** (canal lógico, aqui `/ws`, definido em `AlertGateway` via `@WebSocketGateway({ namespace: '/ws' })` — sem customizar o path). O `AlertGateway` nunca configurou um path customizado, só o namespace; o app Android tentava um path que o servidor nunca serviu, então o handshake do engine.io sempre dava 404 e o `EVENT_CONNECT` nunca disparava — independente do resto do app (REST, indicador online/offline) funcionar normalmente, já que usa um mecanismo de conexão totalmente separado. O dashboard web (`useAlerts.ts`) já fazia certo: `io(\`${WS_URL}/ws\`, {...})` — o `/ws` na própria URL de conexão que define o namespace, sem mexer no path.
+
+**Fix**: `GymWebSocketService.kt` agora conecta em `IO.socket("$WS_URL/ws", opts)` sem customizar `path`, espelhando exatamente o dashboard.
+
+**Validação rigorosa** (não só leitura de código): escrito um script Node usando o mesmo `socket.io-client` do dashboard simulando as duas abordagens contra o `notification-service` rodando de verdade — a abordagem antiga (`path: "/ws/socket.io"`) deu `connect_error: websocket error` e timeout (reproduzindo exatamente "Aguardando conexão" eterno); a abordagem nova (`/ws` na URL, sem path customizado) conectou instantaneamente, igual ao dashboard. `./gradlew :app:compileDebugKotlin` e `assembleDebug` → `BUILD SUCCESSFUL`, APK reinstalado e relançado no emulador sem crash.
+
+---
+
+## 2026-07-03 (4)
+
+### Fix: reps não contavam na câmera ao vivo + alertas não chegavam pro professor
+
+Usuário reportou dois problemas no app rodando com câmera real (não emulador/vídeo de teste): contador de reps não incrementava, e o professor não recebia notificações de alerta.
+
+**1) Contagem de reps quebrada (online E offline)**: `CameraViewModel.onFrame*()` contava uma rep só quando via uma transição **direta** `lastPhase=="BOTTOM" && newPhase=="STANDING"` entre dois frames analisados consecutivos. Só que o ciclo real de movimento passa por `ASCENDING` (joelho entre 90°-160°) entre o fundo do agachamento e ficar em pé — e como a análise roda a cada ~200ms, quase sempre pelo menos um frame cai em `ASCENDING` antes de `STANDING`. Isso faz a checagem de transição direta nunca disparar na prática — comparado com `pose-service/video_analyzer.py::RepCounter`, que já implementa isso certo pra vídeos enviados (máquina de estado: inicia a rep ao sair de `STANDING`→`DESCENDING`, marca `_saw_bottom` ao passar por `BOTTOM`, fecha a rep ao voltar pra `STANDING` vindo de `ASCENDING`/`BOTTOM`, não importa quantos frames de `ASCENDING` no meio). **Fix**: portada a mesma máquina de estado pro `CameraViewModel.kt` (`updateRepCount()`), usada nos dois caminhos (`onFrameOnline` e `onFrameOffline`/ML Kit on-device). Validado com `./gradlew :app:compileDebugKotlin` → `BUILD SUCCESSFUL`.
+
+**2) Sync offline nunca gerava alertas de verdade**: `SyncWorker.kt` (reenvia frames capturados offline pro backend quando a conexão volta) mandava uma **imagem placeholder 1×1 pixel em branco** pro `/api/v1/pose/analyze` em vez dos landmarks reais capturados — o próprio comentário no código já admitia isso como incompleto ("extensão futura"). Resultado: toda sessão gravada em modo offline, ao sincronizar, era reanalisada sobre uma imagem em branco → nenhum landmark detectado → nenhum erro/alerta gerado, mesmo que o aluno tivesse cometido erros reais de execução durante a sessão. **Fix**: novo campo opcional `landmarks_json` no endpoint `/api/v1/pose/analyze` (`pose-service/main.py`) — quando presente, pula a inferência TF Serving inteiramente e roda o `ExerciseAnalyzer` direto sobre os landmarks recebidos (a imagem placeholder no campo `frame` continua sendo enviada só pra satisfazer a assinatura multipart, mas é ignorada). `SyncWorker.kt` agora serializa `frame.landmarks` (já persistidos localmente no SQLite via `LocalFrameStore`) com Gson e manda nesse campo. `PoseApi.analyze()` ganhou o parâmetro `landmarksJson: RequestBody? = null` (não quebra o call site existente do `CameraViewModel`, que não passa esse campo).
+
+**Validação end-to-end**: rebuild do container `pose-service`, `83 passed` nos testes pytest existentes, e teste manual via `curl` no `/api/v1/pose/analyze` com `landmarks_json` simulando um agachamento com joelho caindo — resposta teve `has_alert: true` e `KNEE_CAVE_LEFT`, e o log do `notification-service` confirmou o broadcast: `Alerta broadcast | MEDIUM KNEE_CAVE_LEFT | session=sync-test-session`. Pipeline RabbitMQ→WebSocket→dashboard já funcionava corretamente pro modo online (confirmado por várias entradas antigas `video-test-*` no mesmo log) — o problema era mesmo específico do caminho de sync offline.
+
+**Nota**: não foi possível testar no device físico real (só emulador disponível nesta sessão) — se o app ainda estiver caindo em modo offline sem necessidade no dispositivo real (indicador "Modo offline" na tela), vale checar `ConnectivityObserver.kt`, que hoje exige `NET_CAPABILITY_INTERNET` (internet validada pelo Android) — em redes de academia com captive portal ou sem validação de internet, isso pode reportar offline mesmo com o backend local acessível na mesma rede.
+
+---
+
+## 2026-07-03 (3)
+
+### Fix: build falhava no emulador com erro de jlink (`androidJdkImage`/`core-for-system-modules.jar`)
+
+Usuário reportou erro ao rodar o app no emulador: `compileDebugJavaWithJavac` falhava tentando transformar `core-for-system-modules.jar` via `jlink`, com o processo sendo executado a partir de `/opt/android-studio/jbr/bin/jlink` (JBR 21) e saindo com exit code 1 — o mesmo sintoma que a correção anterior (commit `e0b2479`, "força Java 17 no Gradle") já tinha endereçado configurando `org.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64` em `android-app/gradle.properties`.
+
+**Primeira tentativa (insuficiente)**: `ps aux` mostrou dois Gradle Daemons rodando simultaneamente — um em `java-17-openjdk-amd64` (correto) e outro no JBR 21 embutido do Android Studio. `./gradlew --stop` parou os dois, e `./gradlew :app:compileDebugJavaWithJavac` pela linha de comando funcionou (`BUILD SUCCESSFUL`, novo daemon em JDK 17). Mas o erro **voltou a acontecer rodando pelo botão Run do Android Studio** — ou seja, matar o daemon não era a causa raiz real, só um sintoma.
+
+**Causa raiz real**: a própria IDE não estava resolvendo a macro `gradleJvm=#GRADLE_LOCAL_JAVA_HOME` em `.idea/gradle.xml` para ações de build/run (mesmo essa macro devendo significar "usar `org.gradle.java.home` de `gradle.properties`") — o Studio continuava lançando o processo de build com seu próprio JBR 21. Achado confirmado em `.idea/workspace.xml`: o componente `GradleScriptDefinitionsStorage` tinha `javaHome="$APPLICATION_HOME_DIR$/jbr"` hardcoded, cache da própria IDE apontando pro JBR. (Verificado também que o Studio realmente tinha o projeto certo aberto — `lastOpenedProject` em `RecentProjectsManager` confirma `gymvision-complete/android-app`, não o projeto antigo/órfão `~/Downloads/GymVisionTCC` que também existe no disco.)
+
+**Fix definitivo**: trocado `gradleJvm` em `.idea/gradle.xml` de `#GRADLE_LOCAL_JAVA_HOME` (macro) pro JDK concreto já registrado no `jdk.table.xml` do Studio: `jbr-17` (JetBrains Runtime 17.0.14 em `~/.jdks/jbr-17.0.14`, JDK 17 de verdade, não confundir com o JBR 21 do próprio app do Studio). Também corrigido o `javaHome` cacheado em `.idea/workspace.xml` pro mesmo caminho. Requer fechar/reabrir o projeto (ou reiniciar o Studio) pra IDE reler esses arquivos, já que ela cacheia isso em memória durante a sessão.
+
+---
+
+### Fix: instalação do APK falhava no emulador (`Can't find service: package`, depois `INSTALL_FAILED_TEST_ONLY`)
+
+Depois do build compilar certo, a instalação no emulador falhava. Dois problemas encadeados, nenhum relacionado ao código do app:
+
+**1) `system_server` do emulador corrompido**: `adb logcat` mostrou ~87 crash-dumps em sequência por volta do boot (praticamente todo processo do sistema reiniciando), e o serviço `storage` nem aparecia em `adb shell service list` — depois, mesmo com `storage` já registrado, instalar ainda dava `NullPointerException` em `PackageManagerInternal` dentro de `StorageManagerService.allocateBytes`, sintoma clássico de `system_server` num estado parcialmente inicializado (provavelmente por pressão de memória no host — só ~6.3GB "available" com múltiplos Gradle daemons + Android Studio + emulador rodando ao mesmo tempo). **Fix**: `adb emu kill` no emulador (`Medium_Phone`) e relançado com `emulator -avd Medium_Phone -wipe-data` — cold boot limpo, `storage`/`mount`/`storagestats` todos registrados normalmente após.
+
+**2) `INSTALL_FAILED_TEST_ONLY`**: erro esperado pra um APK debug — `adb install` sozinho rejeita pacotes com a flag `testOnly` do manifest de debug. **Fix**: `adb install -r -t app-debug.apk` (flag `-t` permite instalar pacotes test-only). Instalação e lançamento (`adb shell monkey -p com.gymvision.app ...`) confirmados funcionando, app rodando (PID ativo).
+
+---
+
 ## 2026-07-03 (2)
 
 ### Notificações push + vibração háptica por alerta
