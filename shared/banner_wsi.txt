@@ -1,0 +1,199 @@
+================================================================================
+BANNER ACADEMICO - WSI (Workshop Sistemas de Informacao) - IFMG Campus Ouro Branco
+================================================================================
+
+1. TITULO DO TRABALHO
+--------------------------------------------------------------------------------
+GymVision: um Sistema de Microsservicos para Analise Biomecanica de Exercicios
+em Tempo Real com Visao Computacional
+
+
+2. AUTORES
+--------------------------------------------------------------------------------
+Matheus Henrique Souza Ramires Pereira
+
+
+3. INSTITUICOES
+--------------------------------------------------------------------------------
+1. IFMG Campus Ouro Branco
+
+
+4. INTRODUCAO
+--------------------------------------------------------------------------------
+A pratica de musculacao sem supervisao tecnica adequada e uma das principais
+causas de lesoes em academias, especialmente em exercicios que exigem controle
+postural rigoroso, como agachamento, levantamento terra e remada. Personal
+trainers e professores de educacao fisica, no entanto, nao conseguem observar
+simultaneamente a execucao de todos os alunos em um ambiente de treino, o que
+limita a correcao de erros biomecanicos no momento em que ocorrem. O GymVision
+e um sistema desenvolvido com o objetivo de apoiar esse acompanhamento,
+utilizando visao computacional para estimar a postura corporal do praticante
+em tempo real, durante a execucao de exercicios, e identificar automaticamente
+desvios biomecanicos associados a risco de lesao, notificando o praticante e
+o professor responsavel.
+
+
+5. DESENVOLVIMENTO
+--------------------------------------------------------------------------------
+O GymVision e implantado como 12 containers Docker orquestrados via Docker
+Compose, comunicando-se em uma rede interna dedicada (gymvision-net). Um API
+Gateway Kong (porta 8090) centraliza o roteamento HTTP para os microsservicos
+de dominio: user-service (Kotlin/Spring Boot, porta 8081, PostgreSQL + Redis,
+autenticacao JWT), session-service (Kotlin/Spring Boot, porta 8082,
+PostgreSQL), pose-service (Python/FastAPI, porta 8083) e notification-service
+(NestJS, porta 8085).
+
+O pose-service concentra o nucleo de visao computacional: recebe os quadros de
+video do app Android e os envia via gRPC a um container TensorFlow Serving
+(portas 8500/8501) executando o modelo MoveNet Thunder, que retorna 17
+pontos-chave (keypoints) do corpo com seus respectivos niveis de confianca. Um
+filtro de confianca minima descarta landmarks pouco confiaveis antes de
+alimentar o motor de analise biomecanica baseado em regras, que calcula
+angulos articulares e os compara a limiares especificos por exercicio
+(agachamento, levantamento terra, avanco, supino, remada curvada).
+
+Os resultados e alertas gerados sao publicados como mensagens
+(gym.exercise.result, gym.alert.created, gym.session.ended) em um broker
+RabbitMQ (portas 5672/15672), consumidas de forma assincrona pelo
+notification-service - que as retransmite em tempo real via WebSocket
+(Socket.IO) para o painel web do professor (React) - pelo session-service
+(persistencia da sessao de treino) e pelo analytics-service (Python/FastAPI,
+porta 8086, MongoDB), responsavel pelo historico de evolucao do aluno e
+relatorios em PDF. Series temporais de quadros e metricas de analise sao
+armazenadas em um container TimescaleDB (porta 5433), enquanto videos
+enviados para analise sob demanda ficam em um container MinIO (object storage
+S3-compatible, portas 9000/9001), com retencao controlada por um
+backup-service dedicado, que realiza backups diarios (03h UTC) dos bancos
+PostgreSQL, TimescaleDB e MongoDB.
+
+Todo o pipeline e validado por integracao continua (GitHub Actions): a cada
+push, os 6 microsservicos e o aplicativo Android passam por testes
+automatizados e build isolado; em merges para a branch principal, as imagens
+Docker de cada servico sao publicadas em dois registries (GitHub Container
+Registry e Docker Hub), prontas para deploy.
+
+(local da Figura 1 - ver item 9)
+
+
+6. RESULTADOS E DISCUSSOES
+--------------------------------------------------------------------------------
+O desenvolvimento resultou em um sistema funcional de ponta a ponta, validado
+por uma suite de testes automatizados: o motor de analise biomecanica do
+pose-service possui cobertura de testes unitarios e de integracao para os 5
+tipos de exercicio suportados, incluindo cenarios de deteccao de fase do
+movimento, persistencia de alertas entre quadros consecutivos e classificacao
+de severidade. O pipeline de CI/CD constroi, testa e publica de forma
+automatizada as imagens dos 6 microsservicos a cada alteracao no repositorio,
+em dois registries de containers distintos.
+
+Durante o desenvolvimento, desafios tecnicos relevantes foram superados, como
+o tratamento de oclusao momentanea de articulacoes (via interpolacao temporal
+de landmarks com decaimento de confianca) e a suavizacao de metricas ruidosas
+entre quadros (media movel exponencial), que inicialmente causavam alarmes
+intermitentes mesmo com a postura do aluno praticamente inalterada entre
+quadros. A separacao entre o nivel de risco biomecanico (usado no calculo de
+pontuacao) e o nivel de severidade do alerta (usado na interface) permitiu
+priorizar visualmente, para o professor, os erros com risco real de lesao.
+
+
+7. CONCLUSOES
+--------------------------------------------------------------------------------
+O GymVision demonstra a viabilidade tecnica de um sistema de microsservicos
+para monitoramento biomecanico assistido por visao computacional em ambiente
+de musculacao, integrando deteccao de pose, analise de regras biomecanicas,
+comunicacao em tempo real e visualizacao remota para o professor. Como
+trabalhos futuros, pretende-se realizar validacao empirica do sistema com
+alunos reais em ambiente de academia, comparando os alertas gerados
+automaticamente com a avaliacao de profissionais de educacao fisica, alem de
+ampliar a biblioteca de exercicios suportados e refinar a experiencia do
+aplicativo movel.
+
+
+8. AGRADECIMENTOS
+--------------------------------------------------------------------------------
+Agradeco a professora Luciana Lourdes Silva pela orientacao durante o
+desenvolvimento deste trabalho, realizado no contexto da disciplina de
+Engenharia de Software 2 do IFMG Campus Ouro Branco.
+
+
+9. IMAGEM/FIGURA
+--------------------------------------------------------------------------------
+Sugestao: mosaico com 1 a 2 capturas de tela lado a lado:
+
+1. Tela da camera em uso (CameraScreen) - o app analisando um exercicio em
+   tempo real, com o overlay de pose desenhado sobre o corpo do praticante e
+   o banner de alerta visivel (idealmente um alerta "Grave", com o icone
+   pulsante e fundo vermelho, pra mostrar a classificacao de severidade).
+2. (opcional) Painel do professor (dashboard React) - mostrando o card de
+   alerta recebido em tempo real via WebSocket.
+
+Legenda sugerida:
+"Figura 1 - Tela do aplicativo GymVision durante analise em tempo real, com
+overlay de pose e alerta de severidade Grave."
+
+
+================================================================================
+DIAGRAMA DE ARQUITETURA (codigo Mermaid - colar em https://mermaid.live
+para gerar a imagem PNG/SVG)
+================================================================================
+
+graph TB
+    subgraph Clientes
+        APP[App Android<br/>Kotlin/Compose]
+        DASH[Dashboard Web<br/>React]
+    end
+
+    GW[API Gateway<br/>Kong :8090]
+
+    subgraph "Microsservicos de Dominio"
+        USER[user-service<br/>Kotlin/Spring :8081]
+        SESSION[session-service<br/>Kotlin/Spring :8082]
+        POSE[pose-service<br/>Python/FastAPI :8083]
+        NOTIFY[notification-service<br/>NestJS :8085]
+        ANALYTICS[analytics-service<br/>Python/FastAPI :8086]
+        BACKUP[backup-service<br/>cron diario 03h UTC]
+    end
+
+    TFS[TensorFlow Serving :8500/8501<br/>MoveNet Thunder]
+    MQ[("RabbitMQ :5672<br/>gym.exercise.result<br/>gym.alert.created<br/>gym.session.ended")]
+
+    subgraph Armazenamento
+        PG[("PostgreSQL :5432<br/>users + sessions")]
+        TS[("TimescaleDB :5433<br/>series temporais de pose")]
+        MONGO[("MongoDB :27017<br/>analytics")]
+        REDIS[("Redis :6379<br/>cache/sessao/blacklist JWT")]
+        MINIO[("MinIO :9000<br/>videos + backups")]
+    end
+
+    APP -->|REST/multipart| GW
+    DASH -->|REST| GW
+    DASH <-.WebSocket/SocketIO.-> NOTIFY
+
+    GW --> USER
+    GW --> SESSION
+    GW --> POSE
+    GW --> NOTIFY
+
+    POSE -->|gRPC| TFS
+    POSE --> REDIS
+    POSE --> TS
+    POSE --> MINIO
+    POSE -->|publica| MQ
+
+    MQ -->|consome| SESSION
+    MQ -->|consome| NOTIFY
+    MQ -->|consome| ANALYTICS
+
+    USER --> PG
+    USER --> REDIS
+    SESSION --> PG
+    ANALYTICS --> MONGO
+
+    BACKUP --> PG
+    BACKUP --> TS
+    BACKUP --> MONGO
+    BACKUP --> MINIO
+
+================================================================================
+FIM
+================================================================================
