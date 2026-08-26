@@ -35,6 +35,9 @@ from angle_calculator import calculate_joint_angles  # noqa: E402
 from models import DetectedError, ErrorType  # noqa: E402
 from exercise_analyzer import (  # noqa: E402
     detect_phase, calculate_score, _analyze_squat, _analyze_bench_press,
+    LUNGE_KNEE_ANGLE_FRONT_MIN, LUNGE_KNEE_ANGLE_FRONT_MAX, LUNGE_BACK_ANGLE_MAX,
+    ROW_BACK_ANGLE_MAX, ROW_ELBOW_RANGE_MIN,
+    LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST,
 )
 from ai.synthetic_body import build_frame  # noqa: E402
 from ai.features import extract_features, FEATURE_NAMES, FORM_FEATURE_NAMES, phase_to_code  # noqa: E402
