@@ -49,9 +49,11 @@ fun ProfileScreen(
         ) {
             when {
                 uiState.isLoading -> LoadingState()
-                uiState.error != null -> ErrorState(
+                uiState.error != null -> ProfileErrorContent(
                     message = uiState.error,
+                    isLoggingOut = uiState.isLoggingOut,
                     onRetry = viewModel::load,
+                    onLogout = { viewModel.logout(onLoggedOut) },
                 )
                 uiState.user != null -> ProfileContent(
                     user = uiState.user,
@@ -69,6 +71,48 @@ fun ProfileScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProfileErrorContent(
+    message: String,
+    isLoggingOut: Boolean,
+    onRetry: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            ErrorState(message = message, onRetry = onRetry)
+        }
+
+        OutlinedButton(
+            onClick = onLogout,
+            enabled = !isLoggingOut,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+        ) {
+            if (isLoggingOut) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Sair")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
