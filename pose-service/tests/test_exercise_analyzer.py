@@ -10,10 +10,10 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from models import (
-    ExerciseType, MovementPhase, RiskLevel, ErrorType, LandmarkInput,
+    ExerciseType, MovementPhase, RiskLevel, ErrorType, LandmarkInput, AlertSeverity,
 )
 from exercise_analyzer import (
-    ExerciseAnalyzer, detect_phase, calculate_score,
+    ExerciseAnalyzer, detect_phase, calculate_score, _alert_severity,
     _analyze_squat, _analyze_deadlift, _analyze_lunge,
     _analyze_bench_press, _analyze_bent_over_row,
     SQUAT_BACK_ANGLE_MAX, SQUAT_KNEE_CAVE_THRESHOLD,
@@ -296,3 +296,259 @@ class TestExerciseAnalyzerIntegration:
         result = analyzer.analyze(req)
         assert isinstance(result.has_alert, bool)
         assert isinstance(result.errors, list)
+
+
+# ── Bug 1: fase do movimento (ASCENDING/DESCENDING) através de frames ────────
+# Regressão: analyze() nunca repassava o ângulo do joelho do frame anterior
+# para detect_phase(), então todo frame intermediário (90°-160°) caía no ramo
+# "sem histórico" e era sempre classificado como DESCENDING — ASCENDING nunca
+# era produzido em produção, mesmo com o atleta subindo.
+
+class TestPhaseTracksAcrossSessionFrames:
+    def _frame(self, knee_x_offset: float) -> list:
+        """Quanto maior o offset, mais dobrado o joelho (ângulo menor)."""
+        return [
+            lm(LEFT_SHOULDER, 0.5, 0.1),
+            lm(LEFT_HIP,      0.5, 0.4),
+            lm(LEFT_KNEE,     0.5 + knee_x_offset, 0.7),
+            lm(LEFT_ANKLE,    0.5, 0.9),
+        ]
+
+    def _request(self, landmarks, seq=1, session_id="sess-phase"):
+        return SimpleNamespace(
+            session_id=session_id, student_id="s", frame_seq=seq,
+            exercise_type=ExerciseType.SQUAT, landmarks=landmarks,
+        )
+
+    def test_ascending_detected_when_knee_angle_increases_across_frames(self):
+        analyzer = ExerciseAnalyzer()
+        analyzer.analyze(self._request(self._frame(0.15), seq=1))  # mais dobrado
+        result = analyzer.analyze(self._request(self._frame(0.05), seq=2))  # estendendo
+        assert result.phase == MovementPhase.ASCENDING
+
+    def test_descending_detected_when_knee_angle_decreases_across_frames(self):
+        analyzer = ExerciseAnalyzer()
+        analyzer.analyze(self._request(self._frame(0.05), seq=1))  # mais estendido
+        result = analyzer.analyze(self._request(self._frame(0.15), seq=2))  # dobrando
+        assert result.phase == MovementPhase.DESCENDING
+
+    def test_phase_tracking_is_isolated_per_session(self):
+        analyzer = ExerciseAnalyzer()
+        analyzer.analyze(self._request(self._frame(0.15), seq=1, session_id="a"))
+        # Primeiro frame de uma sessão nova não deve herdar o histórico da sessão "a"
+        result = analyzer.analyze(self._request(self._frame(0.05), seq=1, session_id="b"))
+        assert result.phase == MovementPhase.DESCENDING
+
+
+# ── Bug 2: persistência do alarme de knee cave sob ruído de frame a frame ────
+# Regressão: o desvio percentual (knee-ankle) era comparado ao threshold sem
+# nenhuma suavização — jitter típico de pose estimation fazia o valor cruzar
+# o threshold pra cima e pra baixo a cada frame, "piscando" o alarme mesmo com
+# a posição real do joelho estável e colapsada.
+
+class TestKneeCavePersistsAcrossNoisyFrames:
+    def _lm_map(self, knee_x_offset: float) -> dict:
+        return {
+            LEFT_KNEE:  lm(LEFT_KNEE,  0.5 + knee_x_offset, 0.7),
+            LEFT_ANKLE: lm(LEFT_ANKLE, 0.5, 0.9),
+        }
+
+    def test_flickers_without_smoothing_state(self):
+        """Comportamento antigo (referência): sem estado de suavização, o
+        alarme some em frames cujo ruído cai abaixo do threshold."""
+        angles = JointAngles()
+        detected = []
+        for offset in (0.030, 0.015, 0.032, 0.018):  # alterna acima/abaixo de 2%
+            errors = _analyze_squat(
+                self._lm_map(offset), angles, MovementPhase.BOTTOM,
+                frontal_weight=0.8,
+            )
+            detected.append(any(e.error_type == ErrorType.KNEE_CAVE_LEFT for e in errors))
+        assert detected == [True, False, True, False]
+
+    def test_persists_across_noisy_frames_with_smoothing_state(self):
+        """Corrigido: com o estado de suavização por sessão, o alarme
+        permanece ativo enquanto o desvio (suavizado) superar o threshold,
+        mesmo que frames individuais oscilem por ruído."""
+        angles = JointAngles()
+        smoothing_state: dict = {}
+        detected = []
+        for offset in (0.030, 0.015, 0.032, 0.018, 0.031, 0.016):
+            errors = _analyze_squat(
+                self._lm_map(offset), angles, MovementPhase.BOTTOM,
+                frontal_weight=0.8, smoothing_state=smoothing_state,
+            )
+            detected.append(any(e.error_type == ErrorType.KNEE_CAVE_LEFT for e in errors))
+        assert all(detected), f"esperado alarme persistente em todos os frames, obtido {detected}"
+
+    def test_clears_once_deviation_genuinely_drops(self):
+        """O alarme ainda deve desaparecer quando a posição real do joelho
+        volta a ficar correta de forma sustentada (não apenas ruído de 1 frame)."""
+        angles = JointAngles()
+        smoothing_state: dict = {}
+        for offset in (0.035, 0.032, 0.034):  # joelho colapsado, sustentado
+            _analyze_squat(
+                self._lm_map(offset), angles, MovementPhase.BOTTOM,
+                frontal_weight=0.8, smoothing_state=smoothing_state,
+            )
+        for offset in (0.0, 0.0, 0.0, 0.0, 0.0, 0.0):  # corrige e sustenta
+            errors = _analyze_squat(
+                self._lm_map(offset), angles, MovementPhase.BOTTOM,
+                frontal_weight=0.8, smoothing_state=smoothing_state,
+            )
+        assert not any(e.error_type == ErrorType.KNEE_CAVE_LEFT for e in errors)
+
+
+# ── Bug 3: verificação de postura do tronco não pode ser silenciada por ─────
+# oclusão momentânea de landmark
+# Regressão: quando o landmark do ombro fica indisponível por 1-2 frames
+# (ex.: barra cobrindo o ombro no fundo do agachamento), back_angle vira None
+# e a verificação de BACK_NOT_STRAIGHT é silenciosamente pulada — o sistema
+# reporta "postura correta" mesmo com o tronco visivelmente caído.
+
+class TestPostureCheckSurvivesMomentaryOcclusion:
+    def _good_frame(self) -> list:
+        """Tronco bem inclinado (back_angle > 45°) com todos os landmarks visíveis."""
+        return [
+            lm(LEFT_SHOULDER, 0.75, 0.30),
+            lm(LEFT_HIP,      0.35, 0.55),
+            lm(LEFT_KNEE,     0.55, 0.70),
+            lm(LEFT_ANKLE,    0.45, 0.95),
+        ]
+
+    def _occluded_frame(self) -> list:
+        """Mesmo agachamento, mas sem o landmark do ombro neste frame."""
+        return [
+            lm(LEFT_HIP,   0.35, 0.55),
+            lm(LEFT_KNEE,  0.55, 0.70),
+            lm(LEFT_ANKLE, 0.45, 0.95),
+        ]
+
+    def _request(self, landmarks, seq):
+        return SimpleNamespace(
+            session_id="sess-posture", student_id="s", frame_seq=seq,
+            exercise_type=ExerciseType.SQUAT, landmarks=landmarks,
+        )
+
+    def test_back_not_straight_persists_through_one_frame_of_occlusion(self):
+        analyzer = ExerciseAnalyzer()
+        r1 = analyzer.analyze(self._request(self._good_frame(), seq=1))
+        assert any(e.error_type == ErrorType.BACK_NOT_STRAIGHT for e in r1.errors)
+
+        r2 = analyzer.analyze(self._request(self._occluded_frame(), seq=2))
+        assert r2.joint_angles.back_angle is not None
+        assert any(e.error_type == ErrorType.BACK_NOT_STRAIGHT for e in r2.errors)
+        assert r2.score < 100.0
+
+    def test_interpolation_expires_after_prolonged_occlusion(self):
+        """Interpolação não deve mascarar indefinidamente uma oclusão real e
+        prolongada (ex.: pessoa saiu de quadro) — deve expirar após N frames."""
+        analyzer = ExerciseAnalyzer()
+        analyzer.analyze(self._request(self._good_frame(), seq=1))
+
+        last_back_angle = None
+        for seq in range(2, 8):
+            r = analyzer.analyze(self._request(self._occluded_frame(), seq=seq))
+            last_back_angle = r.joint_angles.back_angle
+
+        assert last_back_angle is None
+
+
+# ── UX: severidade de alerta (Aviso/Grave) e descrições sem métricas ────────
+# Pedido do usuário: nenhum valor numérico de desvio (%/graus) deve aparecer
+# na mensagem do alerta — isso é dado interno só para a lógica de threshold.
+# Severidade exibida na UI tem 2 níveis: WARNING (aviso) e CRITICAL (grave).
+# Tipos de erro com risco de lesão (joelho colapsando, lombar arredondada/
+# tronco caído, joelho passando do pé) são sempre CRITICAL ao disparar,
+# independente do percentual; os demais escalam para CRITICAL só quando o
+# desvio supera 2x o threshold mínimo de detecção.
+
+class TestAlertSeverityClassification:
+    def test_always_critical_error_types_ignore_magnitude(self):
+        """Knee cave/knee-over-toe/back: críticos mesmo com desvio mínimo
+        (ratio≈1), porque o tipo de erro já é risco de lesão por definição."""
+        assert _alert_severity(ErrorType.KNEE_CAVE_LEFT, RiskLevel.MEDIUM, ratio=1.01) == AlertSeverity.CRITICAL
+        assert _alert_severity(ErrorType.KNEE_CAVE_RIGHT, RiskLevel.MEDIUM, ratio=1.01) == AlertSeverity.CRITICAL
+        assert _alert_severity(ErrorType.KNEE_OVER_TOE_LEFT, RiskLevel.MEDIUM, ratio=1.01) == AlertSeverity.CRITICAL
+        assert _alert_severity(ErrorType.BACK_NOT_STRAIGHT, RiskLevel.MEDIUM, ratio=1.01) == AlertSeverity.CRITICAL
+        assert _alert_severity(ErrorType.BACK_ROUNDED, RiskLevel.MEDIUM, ratio=1.01) == AlertSeverity.CRITICAL
+
+    def test_high_risk_level_is_always_critical(self):
+        assert _alert_severity(ErrorType.ELBOW_FLARE, RiskLevel.HIGH) == AlertSeverity.CRITICAL
+
+    def test_mild_deviation_on_non_injury_type_is_warning(self):
+        """Erros que não são de risco de lesão (ex.: amplitude/profundidade)
+        ficam como aviso enquanto o desvio não passar do dobro do threshold."""
+        assert _alert_severity(ErrorType.DEPTH_INSUFFICIENT, RiskLevel.LOW, ratio=1.1) == AlertSeverity.WARNING
+        assert _alert_severity(ErrorType.ELBOW_INSUFFICIENT_RANGE, RiskLevel.MEDIUM, ratio=1.5) == AlertSeverity.WARNING
+        assert _alert_severity(ErrorType.ROW_INCOMPLETE, RiskLevel.MEDIUM, ratio=1.9) == AlertSeverity.WARNING
+
+    def test_deviation_over_double_threshold_escalates_to_critical(self):
+        assert _alert_severity(ErrorType.WRIST_BENT, RiskLevel.MEDIUM, ratio=1.9) == AlertSeverity.WARNING
+        assert _alert_severity(ErrorType.WRIST_BENT, RiskLevel.MEDIUM, ratio=2.0) == AlertSeverity.CRITICAL
+        assert _alert_severity(ErrorType.WRIST_BENT, RiskLevel.MEDIUM, ratio=3.0) == AlertSeverity.CRITICAL
+
+    def test_no_ratio_and_not_high_defaults_to_warning(self):
+        assert _alert_severity(ErrorType.HIPS_TOO_HIGH, RiskLevel.LOW) == AlertSeverity.WARNING
+
+
+class TestErrorDescriptionsHaveNoEmbeddedMetrics:
+    """Nenhuma descrição de erro deve conter dígitos — desvios percentuais/
+    graus são dados internos (joint_angle/threshold_violated), não texto."""
+
+    def _assert_clean(self, errors):
+        import re
+        for err in errors:
+            assert not re.search(r"\d", err.description), (
+                f"{err.error_type}: descrição contém número: {err.description!r}"
+            )
+            assert err.severity in (AlertSeverity.WARNING, AlertSeverity.CRITICAL)
+
+    def test_squat_descriptions_clean(self):
+        lms = lm_map(
+            lm(LEFT_KNEE, 0.53, 0.7), lm(LEFT_ANKLE, 0.5, 0.9),
+        )
+        angles = JointAngles(left_knee=100.0, back_angle=70.0)
+        errors = _analyze_squat(lms, angles, MovementPhase.BOTTOM, frontal_weight=0.8)
+        assert len(errors) >= 2
+        self._assert_clean(errors)
+
+    def test_deadlift_descriptions_clean(self):
+        errors = _analyze_deadlift({}, JointAngles(back_angle=50.0), MovementPhase.BOTTOM)
+        errors += _analyze_deadlift({}, JointAngles(left_hip=140.0), MovementPhase.STANDING)
+        assert len(errors) == 2
+        self._assert_clean(errors)
+
+    def test_lunge_descriptions_clean(self):
+        errors = _analyze_lunge({}, JointAngles(left_knee=60.0, back_angle=50.0), MovementPhase.BOTTOM)
+        assert len(errors) == 2
+        self._assert_clean(errors)
+
+    def test_bench_press_descriptions_clean(self):
+        lms = lm_map(
+            lm(LEFT_SHOULDER, 0.35, 0.5), lm(RIGHT_SHOULDER, 0.65, 0.5),
+            lm(LEFT_ELBOW, 0.15, 0.7), lm(RIGHT_ELBOW, 0.85, 0.7),
+            lm(LEFT_WRIST, 0.50, 0.9),
+        )
+        errors = _analyze_bench_press(lms, JointAngles(), MovementPhase.BOTTOM, frontal_weight=0.8)
+        assert len(errors) >= 2
+        self._assert_clean(errors)
+
+    def test_bent_over_row_descriptions_clean(self):
+        lms = lm_map(
+            lm(LEFT_SHOULDER, 0.4, 0.2), lm(LEFT_ELBOW, 0.3, 0.4), lm(LEFT_WRIST, 0.3, 0.3),
+        )
+        errors = _analyze_bent_over_row(lms, JointAngles(back_angle=60.0), MovementPhase.BOTTOM)
+        assert len(errors) == 2
+        self._assert_clean(errors)
+
+    def test_knee_cave_and_back_errors_are_always_critical_severity(self):
+        lms = lm_map(
+            lm(LEFT_KNEE, 0.53, 0.7), lm(LEFT_ANKLE, 0.5, 0.9),
+        )
+        angles = JointAngles(back_angle=46.0)  # apenas 1° acima do threshold (45°)
+        errors = _analyze_squat(lms, angles, MovementPhase.BOTTOM, frontal_weight=0.8)
+        knee_cave = [e for e in errors if e.error_type == ErrorType.KNEE_CAVE_LEFT]
+        back = [e for e in errors if e.error_type == ErrorType.BACK_NOT_STRAIGHT]
+        assert knee_cave and knee_cave[0].severity == AlertSeverity.CRITICAL
+        assert back and back[0].severity == AlertSeverity.CRITICAL

@@ -18,6 +18,9 @@ class MovementPhase(str, Enum):
 class RiskLevel(str, Enum):
     LOW="LOW"; MEDIUM="MEDIUM"; HIGH="HIGH"
 
+class AlertSeverity(str, Enum):
+    WARNING="WARNING"; CRITICAL="CRITICAL"
+
 class ErrorType(str, Enum):
     KNEE_CAVE_LEFT="KNEE_CAVE_LEFT"; KNEE_CAVE_RIGHT="KNEE_CAVE_RIGHT"
     BACK_NOT_STRAIGHT="BACK_NOT_STRAIGHT"; DEPTH_INSUFFICIENT="DEPTH_INSUFFICIENT"
@@ -49,6 +52,7 @@ class DetectedError:
     error_type: ErrorType
     risk_level: RiskLevel
     description: str
+    severity: AlertSeverity = AlertSeverity.WARNING
     joint_angle: Optional[float] = None
     threshold_violated: Optional[float] = None
 
@@ -62,7 +66,7 @@ class AnalysisResult:
 # Injeta módulo models no sys.modules
 m = types.ModuleType("models")
 for k in ["Landmark","LandmarkInput","JointAngles","DetectedError","AnalysisResult",
-          "ExerciseType","MovementPhase","RiskLevel","ErrorType"]:
+          "ExerciseType","MovementPhase","RiskLevel","ErrorType","AlertSeverity"]:
     setattr(m, k, eval(k))
 sys.modules["models"] = m
 

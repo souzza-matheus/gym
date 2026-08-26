@@ -30,6 +30,7 @@ fun NotificationsScreen(
     viewModel: NotificationsViewModel = viewModel(),
 ) {
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
+    val isConnected by viewModel.isConnected.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -38,7 +39,11 @@ fun NotificationsScreen(
                     Column {
                         Text("Alertas", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = if (alerts.isEmpty()) "Aguardando conexão…" else "${alerts.size} alerta(s) recebido(s)",
+                            text = when {
+                                !isConnected      -> "Conectando…"
+                                alerts.isEmpty()  -> "Conectado — nenhum alerta ainda"
+                                else              -> "${alerts.size} alerta(s) recebido(s)"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -67,8 +72,8 @@ fun NotificationsScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(alerts, key = { it.sessionId + it.timestamp }) { alert ->
-                        AlertItemCard(alert = alert)
+                    items(alerts, key = { it.id }) { item ->
+                        AlertItemCard(alert = item.alert)
                     }
                 }
             }

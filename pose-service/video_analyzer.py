@@ -58,6 +58,7 @@ class RepResult:
     avg_score: float
     errors_in_rep: list[str]
     risk_level: str     # pior risco da rep
+    severity: str        # pior severidade da rep (WARNING/CRITICAL)
 
 
 @dataclass
@@ -70,6 +71,7 @@ class AlertEvent:
     frame_seq: int
     error_type: str
     risk_level: str
+    severity: str
     description: str
     joint_angle: Optional[float]
     score: float
@@ -175,11 +177,13 @@ class RepCounter:
 
         all_errors = [e.error_type.value for f in frames for e in f.errors]
         risk_levels = [e.risk_level.value for f in frames for e in f.errors]
+        severities = [e.severity.value for f in frames for e in f.errors]
         worst_risk = "LOW"
         if "HIGH" in risk_levels:
             worst_risk = "HIGH"
         elif "MEDIUM" in risk_levels:
             worst_risk = "MEDIUM"
+        worst_severity = "CRITICAL" if "CRITICAL" in severities else "WARNING"
 
         self.reps.append(RepResult(
             rep_number=len(self.reps) + 1,
@@ -189,6 +193,7 @@ class RepCounter:
             avg_score=round(avg_score, 1),
             errors_in_rep=list(set(all_errors)),
             risk_level=worst_risk,
+            severity=worst_severity,
         ))
 
         self._in_rep = False
@@ -337,6 +342,7 @@ class VideoAnalyzer:
                         frame_seq=frame_seq,
                         error_type=err.error_type.value,
                         risk_level=err.risk_level.value,
+                        severity=err.severity.value,
                         description=err.description,
                         joint_angle=err.joint_angle,
                         score=result.score,
@@ -444,7 +450,12 @@ class VideoAnalyzer:
                 "score": f.score,
                 "phase": f.phase,
                 "errors": [
-                    {"type": e.error_type.value, "risk": e.risk_level.value, "desc": e.description}
+                    {
+                        "type": e.error_type.value,
+                        "risk": e.risk_level.value,
+                        "severity": e.severity.value,
+                        "desc": e.description,
+                    }
                     for e in f.errors
                 ],
             }
@@ -463,6 +474,7 @@ class VideoAnalyzer:
                 "avg_score": r.avg_score,
                 "errors": r.errors_in_rep,
                 "risk_level": r.risk_level,
+                "severity": r.severity,
             }
             for r in rep_counter.reps
         ]
@@ -475,6 +487,7 @@ class VideoAnalyzer:
                 "frame_seq": a.frame_seq,
                 "error_type": a.error_type,
                 "risk_level": a.risk_level,
+                "severity": a.severity,
                 "description": a.description,
                 "joint_angle": a.joint_angle,
                 "score": a.score,

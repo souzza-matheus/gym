@@ -14,6 +14,7 @@ export interface ProfessorAlert {
   frame_seq: number;
   error_type: string;
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  severity: 'WARNING' | 'CRITICAL';
   description: string;
   joint_angle: number | null;
   score: number;
@@ -30,6 +31,7 @@ export interface RepReport {
   avg_score: number;
   errors: string[];
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  severity: 'WARNING' | 'CRITICAL';
 }
 
 export interface ScoreTimelinePoint {
@@ -43,7 +45,7 @@ export interface CriticalFrame {
   timestamp_ms: number;
   score: number;
   phase: string;
-  errors: { type: string; risk: string; desc: string }[];
+  errors: { type: string; risk: string; severity: string; desc: string }[];
 }
 
 export interface VideoAnalysisReport {

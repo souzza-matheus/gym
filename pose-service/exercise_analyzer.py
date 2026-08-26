@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from models import (
-    LandmarkInput, JointAngles,
+    LandmarkInput, JointAngles, AlertSeverity,
     DetectedError, ErrorType, ExerciseType, MovementPhase, RiskLevel,
 )
 
@@ -65,7 +65,16 @@ from angle_calculator import (
     LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     LEFT_ELBOW, RIGHT_ELBOW,
     LEFT_WRIST, RIGHT_WRIST,
+    MIN_VISIBILITY, ANGLE_SMOOTHING_ALPHA,
 )
+
+# ── Persistência entre frames (estado por sessão) ─────────────────────────────
+# Landmarks ausentes em um frame são mantidos por até N frames (com confiança
+# decaindo) a partir do último frame em que foram detectados — mitiga oclusão
+# parcial momentânea (ex.: ombro coberto pela barra no fundo do agachamento)
+# sem mascarar indefinidamente uma pessoa que de fato saiu de quadro.
+_INTERPOLATION_MAX_STALE_FRAMES: int = 3
+_INTERPOLATION_VISIBILITY_DECAY: float = 0.85
 
 
 # ── Thresholds (defaults do app Android) ─────────────────────────────────────
@@ -105,6 +114,48 @@ _FRONTAL_WEIGHT_FOR_KNEE_CAVE      = 0.40   # mínimo fw para confiar no knee ca
 _LATERAL_WEIGHT_FOR_KNEE_OVER_TOE  = 0.60   # máximo fw para confiar no knee over toe
 
 
+# ── Severidade de alerta (UI) ─────────────────────────────────────────────────
+# Independente de RiskLevel (que dirige o score). Tipos de erro com risco de
+# lesão (joelho colapsando, lombar arredondada/tronco caído, joelho muito
+# além do pé) são sempre GRAVE na UI assim que disparam — a magnitude do
+# desvio já é refletida no RiskLevel/score, não precisa repetir na severidade.
+_ALWAYS_CRITICAL_ERROR_TYPES = {
+    ErrorType.KNEE_CAVE_LEFT,
+    ErrorType.KNEE_CAVE_RIGHT,
+    ErrorType.KNEE_OVER_TOE_LEFT,
+    ErrorType.KNEE_OVER_TOE_RIGHT,
+    ErrorType.BACK_NOT_STRAIGHT,
+    ErrorType.BACK_ROUNDED,
+}
+
+
+def _alert_severity(
+    error_type: ErrorType,
+    risk_level: RiskLevel,
+    ratio: Optional[float] = None,
+) -> AlertSeverity:
+    """
+    Classifica a severidade exibida na UI (Aviso vs Grave).
+
+    GRAVE quando:
+      - o tipo de erro é inerentemente risco de lesão (independente do
+        percentual de desvio); ou
+      - o RiskLevel já é HIGH (ex.: ELBOW_FLARE, ou back_angle/back_rounded
+        muito acima do threshold); ou
+      - `ratio` (desvio medido / threshold mínimo de detecção) é informado
+        e supera 2.0 — desvio mais que o dobro do mínimo configurado.
+
+    Caso contrário, AVISO.
+    """
+    if error_type in _ALWAYS_CRITICAL_ERROR_TYPES:
+        return AlertSeverity.CRITICAL
+    if risk_level == RiskLevel.HIGH:
+        return AlertSeverity.CRITICAL
+    if ratio is not None and ratio >= 2.0:
+        return AlertSeverity.CRITICAL
+    return AlertSeverity.WARNING
+
+
 # ── Detecção de fase ──────────────────────────────────────────────────────────
 
 def detect_phase(
@@ -136,6 +187,7 @@ def _analyze_squat(
     phase: MovementPhase,
     thresholds: Optional[dict] = None,
     frontal_weight: float = 0.0,
+    smoothing_state: Optional[dict] = None,
 ) -> list[DetectedError]:
     """
     Porta de ExerciseAnalyzer.analyzeSquat().
@@ -145,9 +197,26 @@ def _analyze_squat(
       - Knee cave:    só ativo se fw ≥ _FRONTAL_WEIGHT_FOR_KNEE_CAVE (câmera frontal/angled)
       - Knee over toe: só ativo se fw ≤ _LATERAL_WEIGHT_FOR_KNEE_OVER_TOE (câmera lateral/angled)
       - Profundidade e back_angle: ativos em qualquer orientação
+
+    `smoothing_state`, quando informado (estado por sessão mantido pelo
+    ExerciseAnalyzer), aplica suavização EMA (média móvel exponencial) aos
+    desvios percentuais de knee cave / knee-over-toe antes de compará-los ao
+    threshold. Sem isso, ruído de frame a frame no landmark (1-2px de jitter
+    do modelo de pose) faz o desvio cruzar o threshold de forma intermitente,
+    fazendo o alarme "piscar" mesmo com a posição real do joelho estável.
     """
     errors: list[DetectedError] = []
     th = thresholds or {}
+
+    def smoothed(key: str, raw: float) -> float:
+        if smoothing_state is None:
+            return raw
+        prev = smoothing_state.get(key)
+        value = raw if prev is None else (
+            ANGLE_SMOOTHING_ALPHA * raw + (1 - ANGLE_SMOOTHING_ALPHA) * prev
+        )
+        smoothing_state[key] = value
+        return value
 
     depth_angle_min  = th.get("squat_depth_angle_min",    SQUAT_DEPTH_ANGLE_MIN)
     knee_cave_th     = th.get("squat_knee_cave_threshold", SQUAT_KNEE_CAVE_THRESHOLD)
@@ -161,10 +230,11 @@ def _analyze_squat(
             errors.append(DetectedError(
                 error_type=ErrorType.DEPTH_INSUFFICIENT,
                 risk_level=RiskLevel.LOW,
-                description=(
-                    f"Profundidade insuficiente: joelho a {knee_angle:.0f}° "
-                    f"(mín {depth_angle_min:.0f}°)"
+                severity=_alert_severity(
+                    ErrorType.DEPTH_INSUFFICIENT, RiskLevel.LOW,
+                    ratio=knee_angle / depth_angle_min,
                 ),
+                description="Profundidade insuficiente — desça mais no agachamento",
                 joint_angle=knee_angle,
                 threshold_violated=depth_angle_min,
             ))
@@ -179,28 +249,24 @@ def _analyze_squat(
         r_ankle = lm.get(RIGHT_ANKLE)
 
         if l_knee and l_ankle:
-            knee_ankle_diff_pct = (l_knee.x - l_ankle.x) * 100
+            knee_ankle_diff_pct = smoothed("knee_cave_left", (l_knee.x - l_ankle.x) * 100)
             if knee_ankle_diff_pct > knee_cave_th:
                 errors.append(DetectedError(
                     error_type=ErrorType.KNEE_CAVE_LEFT,
                     risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho esquerdo colapsando para dentro "
-                        f"({knee_ankle_diff_pct:.1f}% de desvio)"
-                    ),
+                    severity=_alert_severity(ErrorType.KNEE_CAVE_LEFT, RiskLevel.MEDIUM),
+                    description="Joelho esquerdo colapsando para dentro",
                     threshold_violated=knee_cave_th,
                 ))
 
         if r_knee and r_ankle:
-            knee_ankle_diff_pct = (r_ankle.x - r_knee.x) * 100
+            knee_ankle_diff_pct = smoothed("knee_cave_right", (r_ankle.x - r_knee.x) * 100)
             if knee_ankle_diff_pct > knee_cave_th:
                 errors.append(DetectedError(
                     error_type=ErrorType.KNEE_CAVE_RIGHT,
                     risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho direito colapsando para dentro "
-                        f"({knee_ankle_diff_pct:.1f}% de desvio)"
-                    ),
+                    severity=_alert_severity(ErrorType.KNEE_CAVE_RIGHT, RiskLevel.MEDIUM),
+                    description="Joelho direito colapsando para dentro",
                     threshold_violated=knee_cave_th,
                 ))
     # Câmera lateral: eixo X representa profundidade sagital, não largura frontal.
@@ -216,28 +282,24 @@ def _analyze_squat(
         r_foot = lm.get(RIGHT_FOOT_INDEX)
 
         if l_knee and l_foot:
-            overshoot = l_knee.x - l_foot.x
+            overshoot = smoothed("knee_over_toe_left", l_knee.x - l_foot.x)
             if overshoot > knee_over_toe_max:
                 errors.append(DetectedError(
                     error_type=ErrorType.KNEE_OVER_TOE_LEFT,
                     risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho esquerdo ultrapassando o pé "
-                        f"({overshoot:.3f} normalizado)"
-                    ),
+                    severity=_alert_severity(ErrorType.KNEE_OVER_TOE_LEFT, RiskLevel.MEDIUM),
+                    description="Joelho esquerdo ultrapassando a ponta do pé",
                     threshold_violated=knee_over_toe_max,
                 ))
 
         if r_knee and r_foot:
-            overshoot = r_foot.x - r_knee.x
+            overshoot = smoothed("knee_over_toe_right", r_foot.x - r_knee.x)
             if overshoot > knee_over_toe_max:
                 errors.append(DetectedError(
                     error_type=ErrorType.KNEE_OVER_TOE_RIGHT,
                     risk_level=RiskLevel.MEDIUM,
-                    description=(
-                        f"Joelho direito ultrapassando o pé "
-                        f"({overshoot:.3f} normalizado)"
-                    ),
+                    severity=_alert_severity(ErrorType.KNEE_OVER_TOE_RIGHT, RiskLevel.MEDIUM),
+                    description="Joelho direito ultrapassando a ponta do pé",
                     threshold_violated=knee_over_toe_max,
                 ))
 
@@ -251,10 +313,8 @@ def _analyze_squat(
         errors.append(DetectedError(
             error_type=ErrorType.BACK_NOT_STRAIGHT,
             risk_level=risk,
-            description=(
-                f"Tronco muito inclinado: {angles.back_angle:.0f}° "
-                f"(máx {back_angle_max:.0f}°)"
-            ),
+            severity=_alert_severity(ErrorType.BACK_NOT_STRAIGHT, risk),
+            description="Tronco muito inclinado para frente",
             joint_angle=angles.back_angle,
             threshold_violated=back_angle_max,
         ))
@@ -289,10 +349,8 @@ def _analyze_deadlift(
             errors.append(DetectedError(
                 error_type=ErrorType.BACK_ROUNDED,
                 risk_level=risk,
-                description=(
-                    f"Lombar arredondada: tronco a {angles.back_angle:.0f}° "
-                    f"(máx {back_angle_max:.0f}°)"
-                ),
+                severity=_alert_severity(ErrorType.BACK_ROUNDED, risk),
+                description="Lombar arredondada — risco de lesão na coluna",
                 joint_angle=angles.back_angle,
                 threshold_violated=back_angle_max,
             ))
@@ -304,10 +362,11 @@ def _analyze_deadlift(
             errors.append(DetectedError(
                 error_type=ErrorType.HIPS_TOO_HIGH,
                 risk_level=RiskLevel.LOW,
-                description=(
-                    f"Quadril não totalmente estendido no topo: {hip_angle:.0f}° "
-                    f"(esperado > {hip_standing_th:.0f}°)"
+                severity=_alert_severity(
+                    ErrorType.HIPS_TOO_HIGH, RiskLevel.LOW,
+                    ratio=hip_standing_th / hip_angle,
                 ),
+                description="Quadril não totalmente estendido no topo do movimento",
                 joint_angle=hip_angle,
                 threshold_violated=hip_standing_th,
             ))
@@ -336,13 +395,15 @@ def _analyze_lunge(
         front_knee_angle = angles.left_knee or angles.right_knee
         if front_knee_angle:
             if front_knee_angle < knee_min or front_knee_angle > knee_max:
+                ratio = (
+                    knee_min / front_knee_angle if front_knee_angle < knee_min
+                    else front_knee_angle / knee_max
+                )
                 errors.append(DetectedError(
                     error_type=ErrorType.DEPTH_INSUFFICIENT,
                     risk_level=RiskLevel.LOW,
-                    description=(
-                        f"Ângulo do joelho frontal fora do ideal: {front_knee_angle:.0f}° "
-                        f"(esperado {knee_min:.0f}°–{knee_max:.0f}°)"
-                    ),
+                    severity=_alert_severity(ErrorType.DEPTH_INSUFFICIENT, RiskLevel.LOW, ratio),
+                    description="Ângulo do joelho frontal fora do ideal — ajuste a profundidade do passo",
                     joint_angle=front_knee_angle,
                 ))
 
@@ -350,10 +411,8 @@ def _analyze_lunge(
         errors.append(DetectedError(
             error_type=ErrorType.BACK_NOT_STRAIGHT,
             risk_level=RiskLevel.MEDIUM,
-            description=(
-                f"Tronco muito inclinado no lunge: {angles.back_angle:.0f}° "
-                f"(máx {back_angle_max:.0f}°)"
-            ),
+            severity=_alert_severity(ErrorType.BACK_NOT_STRAIGHT, RiskLevel.MEDIUM),
+            description="Tronco muito inclinado no avanço",
             joint_angle=angles.back_angle,
             threshold_violated=back_angle_max,
         ))
@@ -403,7 +462,8 @@ def _analyze_bench_press(
                 errors.append(DetectedError(
                     error_type=ErrorType.ELBOW_FLARE,
                     risk_level=RiskLevel.HIGH,
-                    description=f"Cotovelos muito abertos ({flare_pct:.0f}% além dos ombros) — risco para ombro",
+                    severity=_alert_severity(ErrorType.ELBOW_FLARE, RiskLevel.HIGH),
+                    description="Cotovelos muito abertos — risco para o ombro",
                     threshold_violated=20.0,
                 ))
     elif frontal_weight < 0.5 and l_sh and l_el:
@@ -416,7 +476,8 @@ def _analyze_bench_press(
                 errors.append(DetectedError(
                     error_type=ErrorType.ELBOW_FLARE,
                     risk_level=RiskLevel.HIGH,
-                    description=f"Cotovelos muito abertos: {flare_angle:.0f}° (máx {elbow_flare_max:.0f}°)",
+                    severity=_alert_severity(ErrorType.ELBOW_FLARE, RiskLevel.HIGH),
+                    description="Cotovelos muito abertos — risco para o ombro",
                     joint_angle=flare_angle,
                     threshold_violated=elbow_flare_max,
                 ))
@@ -437,7 +498,11 @@ def _analyze_bench_press(
                     errors.append(DetectedError(
                         error_type=ErrorType.ELBOW_INSUFFICIENT_RANGE,
                         risk_level=RiskLevel.MEDIUM,
-                        description=f"Amplitude insuficiente: cotovelo a {arm_angle:.0f}° (desça mais a barra)",
+                        severity=_alert_severity(
+                            ErrorType.ELBOW_INSUFFICIENT_RANGE, RiskLevel.MEDIUM,
+                            ratio=arm_angle / elbow_depth_min,
+                        ),
+                        description="Amplitude insuficiente — desça mais a barra",
                         joint_angle=arm_angle,
                         threshold_violated=elbow_depth_min,
                     ))
@@ -449,7 +514,11 @@ def _analyze_bench_press(
             errors.append(DetectedError(
                 error_type=ErrorType.WRIST_BENT,
                 risk_level=RiskLevel.MEDIUM,
-                description=f"Pulso dobrado lateralmente ({wrist_dev:.3f}) — mantenha pulso neutro",
+                severity=_alert_severity(
+                    ErrorType.WRIST_BENT, RiskLevel.MEDIUM,
+                    ratio=wrist_dev / wrist_dev_max,
+                ),
+                description="Pulso dobrado lateralmente — mantenha o pulso neutro",
                 threshold_violated=wrist_dev_max,
             ))
 
@@ -483,7 +552,8 @@ def _analyze_bent_over_row(
         errors.append(DetectedError(
             error_type=ErrorType.BACK_ROUNDED,
             risk_level=risk,
-            description=f"Lombar arredondada: {angles.back_angle:.0f}° (máx {back_angle_max:.0f}°) — risco de lesão",
+            severity=_alert_severity(ErrorType.BACK_ROUNDED, risk),
+            description="Lombar arredondada — risco de lesão na coluna",
             joint_angle=angles.back_angle,
             threshold_violated=back_angle_max,
         ))
@@ -504,7 +574,11 @@ def _analyze_bent_over_row(
                     errors.append(DetectedError(
                         error_type=ErrorType.ROW_INCOMPLETE,
                         risk_level=RiskLevel.MEDIUM,
-                        description=f"Remada incompleta: cotovelo a {arm_angle:.0f}° (puxe mais até {elbow_range_min:.0f}°)",
+                        severity=_alert_severity(
+                            ErrorType.ROW_INCOMPLETE, RiskLevel.MEDIUM,
+                            ratio=elbow_range_min / arm_angle,
+                        ),
+                        description="Remada incompleta — puxe mais o cotovelo",
                         joint_angle=arm_angle,
                         threshold_violated=elbow_range_min,
                     ))
@@ -558,6 +632,53 @@ class ExerciseAnalyzer:
 
     def __init__(self, custom_thresholds: Optional[dict] = None):
         self.thresholds = custom_thresholds or {}
+        # Estado por sessão (session_id) — necessário para fase de movimento
+        # (precisa do ângulo do frame anterior), suavização de métricas
+        # ruidosas e interpolação temporal de landmarks ausentes.
+        self._prev_knee_angle: dict[str, float] = {}
+        self._smoothing_state: dict[str, dict] = {}
+        self._landmark_cache: dict[str, dict[int, tuple]] = {}
+
+    def _interpolate_missing_landmarks(
+        self,
+        session_id: str,
+        lm_map: dict[int, LandmarkInput],
+    ) -> None:
+        """
+        Preenche landmarks ausentes neste frame com o último valor válido
+        conhecido (visibilidade decaindo a cada frame ausente), por até
+        _INTERPOLATION_MAX_STALE_FRAMES frames consecutivos.
+
+        Sem isso, oclusão parcial momentânea (ex.: ombro atrás da barra no
+        fundo do agachamento) faz o landmark sumir do frame — o que zera
+        ângulos derivados dele (back_angle) e suprime silenciosamente
+        verificações de postura que dependem desse landmark.
+
+        Modifica `lm_map` in-place. Não afeta landmark_count reportado
+        (calculado a partir do frame bruto, antes desta chamada).
+        """
+        cache = self._landmark_cache.setdefault(session_id, {})
+        detected_types = set(lm_map.keys())
+
+        for lm_type, (cached_lm, stale_count) in list(cache.items()):
+            if lm_type in detected_types:
+                continue
+            if stale_count >= _INTERPOLATION_MAX_STALE_FRAMES:
+                continue
+            decayed_visibility = cached_lm.visibility * (
+                _INTERPOLATION_VISIBILITY_DECAY ** (stale_count + 1)
+            )
+            lm_map[lm_type] = cached_lm.model_copy(
+                update={"visibility": decayed_visibility}
+            )
+            cache[lm_type] = (cached_lm, stale_count + 1)
+
+        # Só re-cacheia landmarks de fato detectados neste frame (não os
+        # interpolados acima), preservando a contagem de staleness correta.
+        for lm_type in detected_types:
+            landmark = lm_map[lm_type]
+            if landmark.visibility > MIN_VISIBILITY:
+                cache[lm_type] = (landmark, 0)
 
     def analyze(self, request, orientation=None) -> AnalysisResult:
         """
@@ -572,8 +693,12 @@ class ExerciseAnalyzer:
         """
         t0 = time.perf_counter()
 
-        lm_list = request.landmarks
-        lm_map: dict[int, LandmarkInput] = {lm.landmark_type: lm for lm in lm_list}
+        raw_landmark_count = len(request.landmarks)
+        lm_map: dict[int, LandmarkInput] = {
+            lm.landmark_type: lm for lm in request.landmarks
+        }
+        self._interpolate_missing_landmarks(request.session_id, lm_map)
+        lm_list = list(lm_map.values())
 
         # ── Detecta orientação se não fornecida ────────────────────────────
         if orientation is None and lm_list:
@@ -610,13 +735,13 @@ class ExerciseAnalyzer:
                     error_type=ErrorType.LANDMARK_MISSING,
                     risk_level=RiskLevel.LOW,
                     description=(
-                        f"Landmarks insuficientes ({len(lm_list)} detectados, "
+                        f"Landmarks insuficientes ({raw_landmark_count} detectados, "
                         f"{total_key} joints-chave). "
                         "Use foto lateral com corpo inteiro visível."
                     ),
                 )],
                 has_alert=False,
-                landmark_count=len(lm_list),
+                landmark_count=raw_landmark_count,
                 analysis_ms=round(elapsed, 2),
                 camera_orientation=cam_orientation,
             )
@@ -624,15 +749,23 @@ class ExerciseAnalyzer:
         # ── Calcula ângulos (orientação-aware) ─────────────────────────────
         angles = calculate_joint_angles(lm_list, orientation)
 
-        # ── Detecta fase ───────────────────────────────────────────────────
+        # ── Detecta fase ────────────────────────────────────────────────────
+        # Precisa do ângulo do frame anterior (por sessão) para diferenciar
+        # ASCENDING de DESCENDING — sem isso, todo frame intermediário (90°-160°)
+        # cai no ramo "sem histórico" e é sempre classificado como DESCENDING,
+        # mesmo quando o atleta está subindo.
         knee_angle = angles.left_knee or angles.right_knee
-        phase      = detect_phase(knee_angle)
+        prev_knee_angle = self._prev_knee_angle.get(request.session_id)
+        phase = detect_phase(knee_angle, prev_knee_angle)
+        if knee_angle is not None:
+            self._prev_knee_angle[request.session_id] = knee_angle
 
         # ── Seleciona analisador por tipo de exercício ─────────────────────
         th = self.thresholds.get(request.exercise_type.value, {})
+        smoothing_state = self._smoothing_state.setdefault(request.session_id, {})
 
         if request.exercise_type == ExerciseType.SQUAT:
-            errors = _analyze_squat(lm_map, angles, phase, th, frontal_weight)
+            errors = _analyze_squat(lm_map, angles, phase, th, frontal_weight, smoothing_state)
         elif request.exercise_type == ExerciseType.DEADLIFT:
             errors = _analyze_deadlift(lm_map, angles, phase, th, frontal_weight)
         elif request.exercise_type == ExerciseType.LUNGE:
@@ -673,7 +806,7 @@ class ExerciseAnalyzer:
             joint_angles=angles,
             errors=errors,
             has_alert=has_alert,
-            landmark_count=len(lm_list),
+            landmark_count=raw_landmark_count,
             analysis_ms=round(elapsed, 2),
             camera_orientation=cam_orientation,
         )

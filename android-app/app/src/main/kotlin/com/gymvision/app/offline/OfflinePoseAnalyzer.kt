@@ -137,7 +137,23 @@ class OfflinePoseAnalyzer {
         return phase
     }
 
+    // ── Severidade exibida na UI (Aviso/Grave) ────────────────────────────────
+    // Espelha _alert_severity() do exercise_analyzer.py: tipos de erro com
+    // risco de lesão (joelho colapsando/passando do pé, lombar arredondada/
+    // tronco caído) são sempre GRAVE ao disparar, independente do percentual;
+    // os demais só escalam para GRAVE quando o RiskLevel já é HIGH.
+    private val ALWAYS_CRITICAL_ERROR_TYPES = setOf(
+        "KNEE_CAVE_LEFT", "KNEE_CAVE_RIGHT",
+        "KNEE_OVER_TOE_LEFT", "KNEE_OVER_TOE_RIGHT",
+        "BACK_NOT_STRAIGHT", "BACK_ROUNDED",
+    )
+
+    private fun severityFor(errorType: String, riskLevel: String): String =
+        if (errorType in ALWAYS_CRITICAL_ERROR_TYPES || riskLevel == "HIGH") "CRITICAL" else "WARNING"
+
     // ── Análise simplificada (porta dos thresholds do exercise_analyzer.py) ──
+    // Descrições não incluem métricas (%/graus) — esse dado é interno, só para
+    // a lógica de threshold; a UI mostra apenas o motivo em linguagem simples.
 
     private fun analyzeSquat(
         lm: Map<Int, Landmark>,
@@ -151,7 +167,8 @@ class OfflinePoseAnalyzer {
             val knee = leftKnee ?: rightKnee
             if (knee != null && knee > 90f) {
                 errors += DetectedError("DEPTH_INSUFFICIENT", "LOW",
-                    "Profundidade insuficiente: ${knee.toInt()}° (mín 90°)")
+                    "Profundidade insuficiente — desça mais no agachamento",
+                    severity = severityFor("DEPTH_INSUFFICIENT", "LOW"))
             }
         }
 
@@ -159,7 +176,8 @@ class OfflinePoseAnalyzer {
         if (backAngle != null && backAngle > 45f) {
             val risk = if (backAngle > 63f) "HIGH" else "MEDIUM"
             errors += DetectedError("BACK_NOT_STRAIGHT", risk,
-                "Tronco muito inclinado: ${backAngle.toInt()}° (máx 45°)")
+                "Tronco muito inclinado para frente",
+                severity = severityFor("BACK_NOT_STRAIGHT", risk))
         }
 
         // 3. Joelho caindo (câmera frontal — heurística simples)
@@ -167,11 +185,13 @@ class OfflinePoseAnalyzer {
         val rKnee  = lm[KNEE_R]; val rAnkle = lm[ANKLE_R]
         if (lKnee != null && lAnkle != null && (lKnee.x - lAnkle.x) * 100 > 4f) {
             errors += DetectedError("KNEE_CAVE_LEFT", "MEDIUM",
-                "Joelho esquerdo colapsando para dentro")
+                "Joelho esquerdo colapsando para dentro",
+                severity = severityFor("KNEE_CAVE_LEFT", "MEDIUM"))
         }
         if (rKnee != null && rAnkle != null && (rAnkle.x - rKnee.x) * 100 > 4f) {
             errors += DetectedError("KNEE_CAVE_RIGHT", "MEDIUM",
-                "Joelho direito colapsando para dentro")
+                "Joelho direito colapsando para dentro",
+                severity = severityFor("KNEE_CAVE_RIGHT", "MEDIUM"))
         }
 
         return errors
@@ -182,11 +202,13 @@ class OfflinePoseAnalyzer {
         if (phase in listOf("BOTTOM", "ASCENDING") && backAngle != null && backAngle > 30f) {
             val risk = if (backAngle > 45f) "HIGH" else "MEDIUM"
             errors += DetectedError("BACK_ROUNDED", risk,
-                "Lombar arredondada: ${backAngle.toInt()}° (máx 30°)")
+                "Lombar arredondada — risco de lesão na coluna",
+                severity = severityFor("BACK_ROUNDED", risk))
         }
         if (phase == "STANDING" && hipAngle != null && hipAngle < 160f) {
             errors += DetectedError("HIPS_TOO_HIGH", "LOW",
-                "Quadril não totalmente estendido: ${hipAngle.toInt()}°")
+                "Quadril não totalmente estendido no topo do movimento",
+                severity = severityFor("HIPS_TOO_HIGH", "LOW"))
         }
         return errors
     }
@@ -197,12 +219,14 @@ class OfflinePoseAnalyzer {
             val knee = leftKnee ?: rightKnee
             if (knee != null && (knee < 85f || knee > 100f)) {
                 errors += DetectedError("DEPTH_INSUFFICIENT", "LOW",
-                    "Ângulo do joelho fora do ideal: ${knee.toInt()}° (esperado 85°–100°)")
+                    "Ângulo do joelho frontal fora do ideal — ajuste a profundidade do passo",
+                    severity = severityFor("DEPTH_INSUFFICIENT", "LOW"))
             }
         }
         if (backAngle != null && backAngle > 40f) {
             errors += DetectedError("BACK_NOT_STRAIGHT", "MEDIUM",
-                "Tronco muito inclinado no lunge: ${backAngle.toInt()}°")
+                "Tronco muito inclinado no avanço",
+                severity = severityFor("BACK_NOT_STRAIGHT", "MEDIUM"))
         }
         return errors
     }
@@ -212,7 +236,8 @@ class OfflinePoseAnalyzer {
         val lElbow = lm[ELBOW_L]; val lWrist = lm[WRIST_L]
         if (lElbow != null && lWrist != null && abs(lWrist.x - lElbow.x) > 0.04f) {
             errors += DetectedError("WRIST_BENT", "MEDIUM",
-                "Pulso dobrado lateralmente — mantenha pulso neutro")
+                "Pulso dobrado lateralmente — mantenha o pulso neutro",
+                severity = severityFor("WRIST_BENT", "MEDIUM"))
         }
         return errors
     }
@@ -222,7 +247,8 @@ class OfflinePoseAnalyzer {
         if (backAngle != null && backAngle > 35f) {
             val risk = if (backAngle > 52f) "HIGH" else "MEDIUM"
             errors += DetectedError("BACK_ROUNDED", risk,
-                "Lombar arredondada: ${backAngle.toInt()}° (máx 35°) — risco de lesão")
+                "Lombar arredondada — risco de lesão na coluna",
+                severity = severityFor("BACK_ROUNDED", risk))
         }
         return errors
     }

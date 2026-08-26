@@ -78,6 +78,17 @@ class RiskLevel(str, Enum):
     HIGH = "HIGH"
 
 
+class AlertSeverity(str, Enum):
+    """
+    Severidade exibida na UI — independente de RiskLevel (que dirige o
+    cálculo de score). Um erro LOW pode ser "AVISO" mesmo penalizando pouco
+    o score; um erro classificado como risco de lesão (ex.: joelho colapsando)
+    é sempre "GRAVE" na UI, mesmo quando o desvio é pequeno.
+    """
+    WARNING  = "WARNING"   # Aviso — amarelo/laranja
+    CRITICAL = "CRITICAL"  # Grave — vermelho, destaque visual forte
+
+
 class ErrorType(str, Enum):
     KNEE_CAVE_LEFT = "KNEE_CAVE_LEFT"
     KNEE_CAVE_RIGHT = "KNEE_CAVE_RIGHT"
@@ -113,6 +124,7 @@ class JointAngles(BaseModel):
 class DetectedError(BaseModel):
     error_type: ErrorType
     risk_level: RiskLevel
+    severity: AlertSeverity = AlertSeverity.WARNING
     description: str
     joint_angle: Optional[float] = None
     threshold_violated: Optional[float] = None

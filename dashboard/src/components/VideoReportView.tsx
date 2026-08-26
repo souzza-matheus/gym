@@ -1,10 +1,16 @@
 import React from 'react';
 import { ScoreTimelinePoint, VideoAnalysisReport } from '../hooks/useVideoAnalysis';
 
-const RISK_BADGE: Record<string, string> = {
-  HIGH:   'bg-red-500 text-white',
-  MEDIUM: 'bg-yellow-500 text-white',
-  LOW:    'bg-green-500 text-white',
+// Severidade exibida ao usuário: 2 níveis (Grave/Aviso), independente do
+// RiskLevel interno (LOW/MEDIUM/HIGH, que só dirige o score).
+const SEVERITY_BADGE: Record<string, string> = {
+  CRITICAL: 'bg-red-600 text-white',
+  WARNING:  'bg-yellow-500 text-white',
+};
+
+const SEVERITY_LABEL: Record<string, string> = {
+  CRITICAL: 'Grave',
+  WARNING:  'Aviso',
 };
 
 function scoreColor(score: number): string {
@@ -64,7 +70,7 @@ export function VideoReportView({ report }: Props) {
                   <th className="py-1 pr-3">Duração</th>
                   <th className="py-1 pr-3">Score médio</th>
                   <th className="py-1 pr-3">Ângulo mín. joelho</th>
-                  <th className="py-1 pr-3">Risco</th>
+                  <th className="py-1 pr-3">Severidade</th>
                   <th className="py-1 pr-3">Erros</th>
                 </tr>
               </thead>
@@ -76,8 +82,8 @@ export function VideoReportView({ report }: Props) {
                     <td className={`py-1.5 pr-3 font-semibold ${scoreColor(rep.avg_score)}`}>{Math.round(rep.avg_score)}</td>
                     <td className="py-1.5 pr-3">{rep.min_knee_angle != null ? `${rep.min_knee_angle}°` : '—'}</td>
                     <td className="py-1.5 pr-3">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${RISK_BADGE[rep.risk_level] ?? RISK_BADGE.LOW}`}>
-                        {rep.risk_level}
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${SEVERITY_BADGE[rep.severity] ?? SEVERITY_BADGE.WARNING}`}>
+                        {SEVERITY_LABEL[rep.severity] ?? rep.severity}
                       </span>
                     </td>
                     <td className="py-1.5 pr-3 text-gray-500">{rep.errors.join(', ') || '—'}</td>
@@ -107,18 +113,29 @@ export function VideoReportView({ report }: Props) {
         <div className="bg-white rounded-xl p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Alertas enviados ao professor</h3>
           <ul className="space-y-2">
-            {report.professor_alerts.map((alert, i) => (
-              <li key={i} className="border-l-4 border-yellow-400 bg-yellow-50 rounded-lg p-3 text-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${RISK_BADGE[alert.risk_level] ?? RISK_BADGE.LOW}`}>
-                    {alert.risk_level}
-                  </span>
-                  <span className="text-xs text-gray-500 font-mono">{alert.timestamp_label}</span>
-                </div>
-                <p className="text-gray-700">{alert.description}</p>
-                <p className="text-xs text-gray-500 mt-0.5">Score: {alert.score} · Fase: {alert.phase}</p>
-              </li>
-            ))}
+            {report.professor_alerts.map((alert, i) => {
+              const isCritical = alert.severity === 'CRITICAL';
+              return (
+                <li
+                  key={i}
+                  className={`border-l-4 rounded-lg p-3 text-sm ${
+                    isCritical ? 'border-red-600 bg-red-50 ring-2 ring-red-300' : 'border-yellow-400 bg-yellow-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {isCritical && <span className="animate-pulse text-red-600 text-lg" aria-hidden="true">⚠</span>}
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${SEVERITY_BADGE[alert.severity] ?? SEVERITY_BADGE.WARNING}`}>
+                      {SEVERITY_LABEL[alert.severity] ?? alert.severity}
+                    </span>
+                    <span className="text-xs text-gray-500 font-mono">{alert.timestamp_label}</span>
+                  </div>
+                  <p className={isCritical ? 'text-base font-bold text-red-700' : 'text-gray-700'}>
+                    {alert.description}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">Score: {alert.score} · Fase: {alert.phase}</p>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

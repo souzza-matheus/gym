@@ -69,6 +69,7 @@ export class AlertConsumer implements OnModuleInit, OnModuleDestroy {
           exerciseType: data.exercise_type,
           errorType:    data.error_type,
           riskLevel:    data.risk_level,
+          severity:     data.severity ?? 'WARNING',
           description:  data.description,
           jointAngle:   data.joint_angle,
           score:        data.score,

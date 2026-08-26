@@ -23,6 +23,28 @@ fun riskColor(riskLevel: String): Color = when (riskLevel.uppercase()) {
     else -> NeutralGray
 }
 
+/**
+ * Severidade exibida na UI — 2 níveis (Aviso/Grave), independente do
+ * riskLevel interno (LOW/MEDIUM/HIGH, que só dirige o score). Erros de
+ * risco de lesão (joelho colapsando, lombar arredondada/tronco caído,
+ * joelho passando do pé) chegam do backend já como CRITICAL.
+ *
+ * `severity` é nullable porque o Gson deserializa JSON com chave ausente
+ * deixando o campo null mesmo em tipos não-nulos com default (não passa
+ * pelo construtor Kotlin) — null aqui é tratado como WARNING.
+ */
+fun severityColor(severity: String?): Color = when (severity?.uppercase()) {
+    "CRITICAL" -> RiskHigh
+    else -> RiskMedium // WARNING (inclui null/desconhecido)
+}
+
+fun severityLabel(severity: String?): String = when (severity?.uppercase()) {
+    "CRITICAL" -> "Grave"
+    else -> "Aviso"
+}
+
+fun isCriticalSeverity(severity: String?): Boolean = severity?.uppercase() == "CRITICAL"
+
 fun phaseLabel(phase: String): String = when (phase.uppercase()) {
     "STANDING" -> "Em pé"
     "DESCENDING" -> "Descendo"

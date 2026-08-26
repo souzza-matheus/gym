@@ -115,6 +115,7 @@ async def publish_result(result, academy_id: str = "unknown"):
             {
                 "error_type":  e.error_type.value,
                 "risk_level":  e.risk_level.value,
+                "severity":    e.severity.value,
                 "description": e.description,
             }
             for e in result.errors
@@ -136,15 +137,17 @@ async def publish_result(result, academy_id: str = "unknown"):
             _throttle[key] = now
 
             await _publish(QUEUE_ALERT, {
-                "session_id":  result.session_id,
-                "student_id":  result.student_id,
-                "academy_id":  academy_id,
-                "error_type":  err.error_type.value,
-                "risk_level":  err.risk_level.value,
-                "description": err.description,
-                "joint_angle": err.joint_angle,
-                "score":       result.score,
-                "phase":       result.phase.value,
+                "session_id":    result.session_id,
+                "student_id":    result.student_id,
+                "academy_id":    academy_id,
+                "exercise_type": result.exercise_type.value,
+                "error_type":    err.error_type.value,
+                "risk_level":    err.risk_level.value,
+                "severity":      err.severity.value,
+                "description":   err.description,
+                "joint_angle":   err.joint_angle,
+                "score":         result.score,
+                "phase":         result.phase.value,
             })
 
 
@@ -159,6 +162,7 @@ async def publish_alert(
     joint_angle,
     score: float,
     phase: str,
+    severity: str = "WARNING",
 ):
     """Publica um único gym.alert.created — usado pelo modo vídeo."""
     await _publish(QUEUE_ALERT, {
@@ -168,6 +172,7 @@ async def publish_alert(
         "exercise_type": exercise_type,
         "error_type":    error_type,
         "risk_level":    risk_level,
+        "severity":      severity,
         "description":   description,
         "joint_angle":   joint_angle,
         "score":         score,

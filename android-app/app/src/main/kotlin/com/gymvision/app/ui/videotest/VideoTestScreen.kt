@@ -6,6 +6,11 @@ import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -58,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -74,10 +80,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gymvision.app.model.DetectedError
 import com.gymvision.app.ui.camera.PoseOverlay
 import com.gymvision.app.ui.components.ScoreGauge
+import com.gymvision.app.ui.components.errorDescription
 import com.gymvision.app.ui.components.errorIcon
 import com.gymvision.app.ui.components.exerciseLabel
+import com.gymvision.app.ui.components.isCriticalSeverity
 import com.gymvision.app.ui.components.phaseLabel
-import com.gymvision.app.ui.components.riskColor
+import com.gymvision.app.ui.components.severityColor
 import com.gymvision.app.ui.theme.RiskLow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -449,8 +457,9 @@ private fun PlaybackUI(
             )
         }
 
-        // Alert banner for current HIGH/MEDIUM error
-        val alertError = currentFrame?.errors?.firstOrNull { it.riskLevel in listOf("HIGH", "MEDIUM") }
+        // Alert banner for current error — prioriza GRAVE (risco de lesão) sobre Aviso
+        val alertError = currentFrame?.errors?.firstOrNull { isCriticalSeverity(it.severity) }
+            ?: currentFrame?.errors?.firstOrNull { it.riskLevel in listOf("HIGH", "MEDIUM") }
         AnimatedVisibility(
             visible = alertError != null,
             modifier = Modifier
@@ -461,22 +470,28 @@ private fun PlaybackUI(
             exit = slideOutVertically { -it } + fadeOut(),
         ) {
             alertError?.let { err ->
+                val critical = isCriticalSeverity(err.severity)
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    color = riskColor(err.riskLevel),
+                    color = severityColor(err.severity),
                     shadowElevation = 8.dp,
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
+                        if (critical) {
+                            PulsingWarningIcon()
+                        } else {
+                            Icon(Icons.Filled.Warning, contentDescription = null, tint = Color.White)
+                        }
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = err.description,
+                            text = errorDescription(err.errorType),
                             color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = if (critical) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (critical) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
                 }
@@ -493,6 +508,27 @@ private fun PlaybackUI(
                 .padding(16.dp),
         )
     }
+}
+
+/** Ícone que pulsa (alpha) enquanto exibido — usado para alertas GRAVE (risco de lesão). */
+@Composable
+private fun PulsingWarningIcon(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    val transition = rememberInfiniteTransition(label = "alert-pulse")
+    val alpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 600),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "alert-pulse-alpha",
+    )
+    Icon(
+        Icons.Filled.Warning,
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier.alpha(alpha),
+    )
 }
 
 @Composable
@@ -522,18 +558,31 @@ private fun VideoErrorsCard(errors: List<DetectedError>, modifier: Modifier = Mo
                 )
                 Spacer(Modifier.height(8.dp))
                 errors.forEach { error ->
+                    val critical = isCriticalSeverity(error.severity)
                     Row(
                         modifier = Modifier.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = errorIcon(error.errorType),
-                            contentDescription = null,
-                            tint = riskColor(error.riskLevel),
-                            modifier = Modifier.size(20.dp),
-                        )
+                        if (critical) {
+                            PulsingWarningIcon(
+                                modifier = Modifier.size(22.dp),
+                                tint = severityColor(error.severity),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = errorIcon(error.errorType),
+                                contentDescription = null,
+                                tint = severityColor(error.severity),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                         Spacer(Modifier.width(8.dp))
-                        Text(text = error.description, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = errorDescription(error.errorType),
+                            style = if (critical) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (critical) FontWeight.Bold else FontWeight.Normal,
+                            color = if (critical) severityColor(error.severity) else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }

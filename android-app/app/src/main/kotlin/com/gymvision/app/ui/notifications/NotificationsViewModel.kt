@@ -10,11 +10,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
+
+/**
+ * `id` gerado no cliente — o timestamp do backend só tem granularidade de
+ * segundo (`time.strftime(...%SZ...)`), então dois alertas do mesmo session_id
+ * no mesmo segundo (comum: erro no joelho esquerdo E direito no mesmo frame)
+ * colidem se a key do LazyColumn depender só de sessionId+timestamp, travando
+ * o Compose com "Key ... was already used".
+ */
+data class AlertItem(val id: String = UUID.randomUUID().toString(), val alert: WsAlert)
 
 class NotificationsViewModel : ViewModel() {
 
-    private val _alerts = MutableStateFlow<List<WsAlert>>(emptyList())
-    val alerts: StateFlow<List<WsAlert>> = _alerts
+    private val _alerts = MutableStateFlow<List<AlertItem>>(emptyList())
+    val alerts: StateFlow<List<AlertItem>> = _alerts
+
+    val isConnected: StateFlow<Boolean> = GymWebSocketService.isConnected
 
     init {
         val userId    = ApiClient.getUserId()
@@ -25,7 +37,7 @@ class NotificationsViewModel : ViewModel() {
             GymWebSocketService.connectAsMonitor(userId, academyId, role)
             viewModelScope.launch {
                 GymWebSocketService.alerts.collect { alert ->
-                    _alerts.update { listOf(alert) + it }
+                    _alerts.update { listOf(AlertItem(alert = alert)) + it }
                     AlertNotificationHelper.notify(alert)
                 }
             }
