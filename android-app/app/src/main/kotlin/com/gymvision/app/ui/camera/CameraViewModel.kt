@@ -59,6 +59,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var lastAnalysisTime = 0L
     private val analysisIntervalMs = 200L
 
+    // Contagem de reps via máquina de estado (espelha RepCounter do video_analyzer.py
+    // no pose-service). Não basta checar transição direta BOTTOM→STANDING entre dois
+    // frames analisados: o ciclo real passa por ASCENDING (90°-160°) entre os dois,
+    // e como a análise roda a cada ~200ms, quase sempre há pelo menos um frame
+    // amostrado em ASCENDING antes de STANDING — uma checagem de transição direta
+    // nunca dispara na prática, e a rep nunca é contada.
+    private var repInProgress = false
+    private var repSawBottom  = false
+
+    private fun updateRepCount(newPhase: String): Int {
+        val prevPhase = lastPhase
+        if (!repInProgress && prevPhase == "STANDING" && newPhase == "DESCENDING") {
+            repInProgress = true
+            repSawBottom = false
+        }
+        var count = _state.value.repCount
+        if (repInProgress) {
+            if (newPhase == "BOTTOM") repSawBottom = true
+            if (repSawBottom &&
+                (prevPhase == "ASCENDING" || prevPhase == "BOTTOM") &&
+                newPhase == "STANDING"
+            ) {
+                count++
+                repInProgress = false
+                repSawBottom = false
+            }
+        }
+        lastPhase = newPhase
+        return count
+    }
+
     private val offlinePoseAnalyzer = OfflinePoseAnalyzer()
     private val frameStore = LocalFrameStore(application.applicationContext)
 
@@ -263,9 +294,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (response.isSuccessful && body != null) {
                 val analysis    = body.analysis
                 val newPhase    = analysis?.phase ?: _state.value.phase
-                val newRepCount = if (lastPhase == "BOTTOM" && newPhase == "STANDING")
-                    _state.value.repCount + 1 else _state.value.repCount
-                lastPhase = newPhase
+                val newRepCount = updateRepCount(newPhase)
                 _state.value = AnalysisUiState(
                     isAnalyzing   = false,
                     score         = analysis?.score ?: _state.value.score,
@@ -314,9 +343,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             offlinePoseAnalyzer.analyze(bitmap, exerciseType)
         }.onSuccess { result ->
             val newPhase    = result.phase
-            val newRepCount = if (lastPhase == "BOTTOM" && newPhase == "STANDING")
-                _state.value.repCount + 1 else _state.value.repCount
-            lastPhase = newPhase
+            val newRepCount = updateRepCount(newPhase)
 
             frameStore.insert(LocalFrameStore.PendingFrame(
                 sessionId    = sessionId,
