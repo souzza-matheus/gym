@@ -8,6 +8,7 @@ export interface Alert {
   exerciseType: string;
   errorType: string;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  severity: 'WARNING' | 'CRITICAL';
   description: string;
   score: number;
   phase: string;
@@ -31,7 +32,15 @@ export function useAlerts(academyId: string, userId: string) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const socket = io(`${WS_URL}/ws`, { transports: ['websocket'] });
+    // 'polling' como fallback de 'websocket' — redes de academia com proxy/
+    // firewall restritivo às vezes bloqueiam upgrade para WS puro.
+    const socket = io(`${WS_URL}/ws`, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
