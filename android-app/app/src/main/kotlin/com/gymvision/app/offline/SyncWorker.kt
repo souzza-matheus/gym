@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.google.gson.Gson
 import com.gymvision.app.api.ApiClient
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -19,15 +20,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Fluxo:
  *   1. Lê até 200 frames não sincronizados do [LocalFrameStore]
  *   2. Agrupa por sessão → processa em ordem (frame_seq ASC)
- *   3. Para cada frame: reconstrói a chamada /api/v1/pose/analyze
- *      Nota: o servidor analisa os landmarks recebidos; aqui enviamos os landmarks
- *      já processados offline como "frame" vazio + landmarks_json (extensão futura).
- *      Na implementação atual, o worker re-envia os bytes do frame se disponíveis,
- *      ou notifica o session-service diretamente com o resumo acumulado.
+ *   3. Para cada frame: reconstrói a chamada /api/v1/pose/analyze enviando os
+ *      landmarks já processados offline (`landmarks_json`) + um JPEG placeholder
+ *      no campo `frame` (obrigatório na assinatura multipart, mas ignorado pelo
+ *      servidor quando `landmarks_json` está presente — pula a inferência TF
+ *      Serving e roda o analyzer direto sobre os landmarks recebidos).
  *   4. Marca frames como sincronizados.
  *   5. Ao finalizar uma sessão, chama [SessionApi.end] para fechar a sessão no backend.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+
+    private val gson = Gson()
 
     companion object {
         private const val TAG = "GymVision.SyncWorker"
@@ -69,24 +72,25 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
             for (frame in sortedFrames) {
                 runCatching {
-                    // Envia landmarks como JSON numa requisição mínima ao servidor.
-                    // O pose-service aceita um campo "landmarks_json" opcional além do frame.
-                    // Neste modo de sync, enviamos uma imagem placeholder (1x1 pixel branco)
-                    // e os landmarks pré-calculados para que o servidor apenas registre a análise
-                    // e publique alertas sem reprocessar a imagem.
-                    val placeholderJpeg = PLACEHOLDER_JPEG
+                    // Frame real já foi descartado (só os landmarks são persistidos
+                    // offline) — envia um JPEG placeholder pra satisfazer a assinatura
+                    // multipart, e os landmarks pré-calculados via landmarks_json pra
+                    // o servidor rodar o analyzer sem precisar reprocessar imagem.
                     val framePart = MultipartBody.Part.createFormData(
                         "frame", "frame.jpg",
-                        placeholderJpeg.toRequestBody("image/jpeg".toMediaTypeOrNull())
+                        PLACEHOLDER_JPEG.toRequestBody("image/jpeg".toMediaTypeOrNull())
                     )
+                    val landmarksJsonPart = gson.toJson(frame.landmarks)
+                        .toRequestBody("text/plain".toMediaTypeOrNull())
 
                     ApiClient.poseApi.analyze(
-                        frame        = framePart,
-                        exerciseType = frame.exerciseType.toRequestBody("text/plain".toMediaTypeOrNull()),
-                        sessionId    = frame.sessionId.toRequestBody("text/plain".toMediaTypeOrNull()),
-                        studentId    = frame.studentId.toRequestBody("text/plain".toMediaTypeOrNull()),
-                        frameSeq     = frame.frameSeq.toString().toRequestBody("text/plain".toMediaTypeOrNull()),
-                        academyId    = frame.academyId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        frame         = framePart,
+                        exerciseType  = frame.exerciseType.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        sessionId     = frame.sessionId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        studentId     = frame.studentId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        frameSeq      = frame.frameSeq.toString().toRequestBody("text/plain".toMediaTypeOrNull()),
+                        academyId     = frame.academyId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                        landmarksJson = landmarksJsonPart,
                     )
                 }.onSuccess { response ->
                     if (response.isSuccessful) {

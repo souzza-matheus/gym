@@ -26,7 +26,8 @@ interface PoseApi {
         @Part("session_id") sessionId: RequestBody,
         @Part("student_id") studentId: RequestBody,
         @Part("frame_seq") frameSeq: RequestBody,
-        @Part("academy_id") academyId: RequestBody
+        @Part("academy_id") academyId: RequestBody,
+        @Part("landmarks_json") landmarksJson: RequestBody? = null,
     ): Response<PoseAnalysisResponse>
 
     @Multipart
